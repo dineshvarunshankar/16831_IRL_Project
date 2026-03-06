@@ -8,7 +8,7 @@ Before running the visualization, you need to set up a conda environment and ins
 
 ### 1. Create a Conda Environment
 
-We recommend creating a fresh conda environment named `roblearn`:
+Creating a conda environment:
 
 ```bash
 conda create -n roblearn python=3.10
