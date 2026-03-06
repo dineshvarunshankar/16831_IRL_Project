@@ -1,4 +1,4 @@
-# 16831_IRL_Project
+# Learning Locomotion 
 
 This repository contains tools for visualizing retargeted human motion data on the Unitree G1 humanoid robot using MuJoCo.
 
