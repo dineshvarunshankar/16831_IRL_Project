@@ -1,75 +1,39 @@
-# 16831_IRL_Project
+# LocoMimic
 
-This repository contains tools for visualizing retargeted human motion data on the Unitree G1 humanoid robot using MuJoCo.
+This repository contains tools for simulating, visualizing, and training retargeted human motion on the Unitree G1 humanoid robot using MuJoCo and Gymnasium. 
 
-## Prerequisites
+## Setup
 
-Before running the visualization, you need to set up a conda environment and install the required dependencies.
-
-### 1. Create a Conda Environment
-
-We recommend creating a fresh conda environment named `roblearn`:
-
+1. **Conda Environment**:
 ```bash
 conda create -n roblearn python=3.10
 conda activate roblearn
 ```
 
-### 2. Install Dependencies
-
-Install the required Python packages using the provided `requirements.txt` file. Make sure you are using at least `mujoco>=3.5.0`, as older versions do not support the `dampratio` attribute used in the G1 robot XML.
-
+2. **Install Dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
+*(Requires `mujoco>=3.5.0` for full G1 robot compatibility).*
 
-### 3. Clone MuJoCo Menagerie (If not present)
+## Usage
 
-The visualization requires the MuJoCo Menagerie model for the Unitree G1. If you don't already have it in the repository:
-
+### Motion Visualization
+Visualize pre-retargeted motion data interactively:
 ```bash
-git clone https://github.com/google-deepmind/mujoco_menagerie.git
-```
-
-## Running the Visualization
-
-The main script is `visualize.py`. It can automatically find and play back the LAFAN1 motion data from the dataset. 
-
-By default, the script looks for `.csv` files inside `./data/lafan1_retargeted`.
-
-### Usage
-
-**Run with auto-detection:**
-If you just run the script, it will automatically find the first available `walk*` CSV file and visualize it in an interactive window.
-```bash
+# Auto-detect and run first available CSV
 python visualize.py
-```
 
-**Run a specific CSV file:**
-```bash
-python visualize.py --csv data/lafan1_retargeted/walk1_subject1.csv
-```
+# Run specific motion (e.g. at half speed)
+python visualize.py --csv data/lafan1_retargeted/walk1_subject1.csv --speed 0.5
 
-**Run at half speed:**
-```bash
-python visualize.py --speed 0.5
-```
-
-**List all available motions:**
-```bash
+# List available motions
 python visualize.py --list
 ```
 
-## Dataset
+### Reinforcement Learning Framework (`env/`)
+The `env` directory contains a Gym environment for motion mimicry:
+- **`motion_clip.py`**: Serves reference motion frames from datasets (e.g., LAFAN1).
+- **`locomimic_env.py`**: A Gymnasium environment where the robot learns to match reference poses.
 
-If you need the LAFAN1 retargeted dataset, you can download it from Hugging Face using the command suggested by the script:
-
-```bash
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id='lvhaidong/LAFAN1_Retargeting_Dataset',
-    repo_type='dataset',
-    local_dir='./data/lafan1_retargeted'
-)"
-```
+*(Note: Training scripts and baselines are located in `train/` and `scripts/`).*
