@@ -24,11 +24,13 @@ import numpy as np
 import mujoco 
 import gymnasium as gym 
 from env.motion_clip import MotionClip
+import mujoco.viewer
+import time
 
 G1_XML = "mujoco_menagerie/unitree_g1/scene.xml"
 
 class LocoMimicEnv(gym.Env):
-    def __init__(self, motion_clip_path):
+    def __init__(self, motion_clip_path, render_mode=None):
 
         """
         Sets up the simulation environment, robot model, reference motion,
@@ -95,6 +97,11 @@ class LocoMimicEnv(gym.Env):
         self.n_steps = 0 # counts env steps in current episode 
         self.max_steps = 1000 # corresponds to about 33 seconds at 30 fps
 
+        # render stuff
+        self.render_mode = render_mode
+        self.viewer = None
+        self.renderer = None
+
     def reset(self, seed=None, options=None):
         """
         Starts a new episode by placing the robot at a random point in the
@@ -126,7 +133,29 @@ class LocoMimicEnv(gym.Env):
         return self._get_obs().astype(np.float32), {}
 
     def step(self, action):
-        pass
+        """
+        Advances the simulation by one policy step. Applies the action via PD
+        control, steps the physics n_substeps times, then returns the standard
+        Gymnasium tuple. The phase advances by one frame per step, looping
+        back to the start when the clip ends.
+        """
+        self._apply_pd_control(action)
+           
+        for i in range(self.n_substeps):
+            mujoco.mj_step(self.model, self.data)
+        
+        self.n_steps += 1
+        self.phase = (self.phase + 1) % len(self.motion)
+        self.last_action = action.copy()
+
+        #returns 
+        obs = self._get_obs()
+        reward = self._compute_reward()
+        terminated = self._is_terminated()
+        truncated = self.n_steps >= self.max_steps
+        info = {}
+
+        return obs, reward, terminated, truncated, info
 
     def _get_obs(self):
         """
@@ -150,7 +179,7 @@ class LocoMimicEnv(gym.Env):
         ref_joint_vel = ref_qvel[6:]          
         ref_root_vel  = ref_qvel[0:3] 
         
-        phase_norm = phase_norm = np.array([self.phase / len(self.motion)]) #normalized phase for obs
+        phase_norm = np.array([self.phase / len(self.motion)]) #normalized phase for obs
 
         obs = np.concatenate([
             joint_pos,
@@ -164,8 +193,8 @@ class LocoMimicEnv(gym.Env):
 
         return obs
 
-    def _compute_reward(self, action):
-        pass
+    def _compute_reward(self):
+        return 0
 
     def _is_terminated(self):
         """
@@ -215,4 +244,39 @@ class LocoMimicEnv(gym.Env):
         self.data.ctrl[:] =  torques
 
     def close(self):
-        pass
+        """
+        Cleans up viewer and renderer resources.
+        """
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
+        if self.renderer is not None:
+            self.renderer.close()
+            self.renderer = None
+
+    def render(self):
+        """
+        Renders the current simulation state.
+        - 'human'     : opens an interactive viewer window
+        - 'rgb_array' : returns a (H, W, 3) numpy array for video recording
+        """
+        if self.render_mode == 'human':
+            if self.viewer is None:
+                self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+            
+            # follow camera — tracks robot root position
+            self.viewer.cam.lookat[0] = self.data.qpos[0]  # x
+            self.viewer.cam.lookat[1] = self.data.qpos[1]  # y
+            self.viewer.cam.lookat[2] = self.data.qpos[2]  # z
+            self.viewer.cam.distance  = 3.0
+            self.viewer.cam.azimuth   = 90
+            self.viewer.cam.elevation = -20
+            
+            self.viewer.sync()
+            time.sleep(self.dt)
+
+        elif self.render_mode == 'rgb_array':
+            if self.renderer is None:
+                self.renderer = mujoco.Renderer(self.model, height=480, width=640)
+            self.renderer.update_scene(self.data, camera='side')
+            return self.renderer.render()
