@@ -1,0 +1,35 @@
+# Data and models
+data/
+models/
+logs/
+videos/
+
+# External repos
+mujoco_menagerie/
+unitree_mujoco/
+
+# wandb
+wandb/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environments
+.env
+*.env
+
+# Mac
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/

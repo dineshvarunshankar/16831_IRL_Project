@@ -10,25 +10,29 @@ conda create -n roblearn python=3.10
 conda activate roblearn
 ```
 
-2. **Install Dependencies**:
+### 2. Install PyTorch
+Install PyTorch manually based on your platform before anything else:
+```bash
+# Linux with NVIDIA GPU (CUDA 12.x)
+pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+
+# Mac M-series
+pip install torch==2.1.0
+
+# CPU only
+pip install torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+```
+
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
-*(Requires `mujoco>=3.5.0` for full G1 robot compatibility).*
 
-## Usage
-
-### Motion Visualization
-Visualize pre-retargeted motion data interactively:
+### 4. External Dependencies
+These are not committed to the repo — clone them separately:
 ```bash
-# Auto-detect and run first available CSV
-python visualize.py
-
-# Run specific motion (e.g. at half speed)
-python visualize.py --csv data/lafan1_retargeted/walk1_subject1.csv --speed 0.5
-
-# List available motions
-python visualize.py --list
+git clone https://github.com/google-deepmind/mujoco_menagerie
+git clone https://github.com/unitreerobotics/unitree_mujoco
 ```
 
 ### Reinforcement Learning Framework (`env/`)
