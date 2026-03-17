@@ -35,9 +35,35 @@ git clone https://github.com/google-deepmind/mujoco_menagerie
 git clone https://github.com/unitreerobotics/unitree_mujoco
 ```
 
-### Reinforcement Learning Framework (`env/`)
-The `env` directory contains a Gym environment for motion mimicry:
-- **`motion_clip.py`**: Serves reference motion frames from datasets (e.g., LAFAN1).
-- **`locomimic_env.py`**: A Gymnasium environment where the robot learns to match reference poses.
+## Usage
 
-*(Note: Training scripts and baselines are located in `train/` and `scripts/`).*
+### Motion Visualization
+```bash
+python visualize.py
+python visualize.py --csv data/lafan1_retargeted/g1/walk1_subject1.csv --speed 0.5
+python visualize.py --list
+```
+
+### Training
+```bash
+# SAC
+PYTHONPATH=. python -m train.train
+
+# Random baseline
+PYTHONPATH=. python scripts/random_baseline.py
+```
+
+### Project Structure
+```
+env/
+  motion_clip.py      — loads reference motion from CSV
+  locomimic_env.py    — Gymnasium environment for motion imitation
+train/
+  agents/
+    sac/              — SAC implementation from scratch
+  configs/            — YAML hyperparameter configs
+  train.py            — main training loop with wandb logging
+scripts/
+  random_baseline.py  — random agent evaluation
+visualize.py          — interactive motion visualization
+```
