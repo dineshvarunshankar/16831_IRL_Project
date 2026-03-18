@@ -102,6 +102,18 @@ class LocoMimicEnv(gym.Env):
         self.viewer = None
         self.renderer = None
 
+        #reward 
+        self.target_bodies = list(range(1, self.model.nbody))
+
+        #reward weights
+        self.w_pos = 1.0
+        self.w_ori = 1.0
+        self.w_vel = 1.0
+        self.w_angv = 1.0
+        self.w_action = -0.1
+        self.w_limit = -10.0
+        self.w_self_contact = -0.1
+
     def reset(self, seed=None, options=None):
         """
         Starts a new episode by placing the robot at a random point in the
@@ -150,7 +162,7 @@ class LocoMimicEnv(gym.Env):
 
         #returns 
         obs = self._get_obs()
-        reward = self._compute_reward()
+        reward = self._compute_reward(action)
         terminated = self._is_terminated()
         truncated = self.n_steps >= self.max_steps
         info = {}
@@ -193,8 +205,103 @@ class LocoMimicEnv(gym.Env):
 
         return obs
 
-    def _compute_reward(self):
-        return 0
+    def _compute_reward(self, action):
+        
+        # current body positions
+        q_pos_curr = self.data.qpos.copy()
+        q_vel_curr = self.data.qvel.copy()
+        
+        current_pos = {}
+        current_rot = {}
+        current_vel = {}
+        current_ang_vel = {}
+
+        for body_id in self.target_bodies:
+            current_pos[body_id] = self.data.xpos[body_id].copy()
+            current_rot[body_id] = self.data.xmat[body_id].reshape(3, 3).copy()
+            current_vel[body_id] = self.data.cvel[body_id, 3:].copy()  
+            current_ang_vel[body_id] = self.data.cvel[body_id, 0:3].copy()
+
+        # set to reference
+        self.data.qpos[:] = self.motion.get_qpos(self.phase)
+        self.data.qvel[:] = self.motion.get_qvel(self.phase)
+        mujoco.mj_forward(self.model, self.data)
+
+        ref_pos  = {}
+        ref_rot  = {}
+        ref_linv = {}
+        ref_angv = {}
+        for body_id in self.target_bodies:
+            ref_pos[body_id]  = self.data.xpos[body_id].copy()
+            ref_rot[body_id]  = self.data.xmat[body_id].reshape(3, 3).copy()
+            ref_linv[body_id] = self.data.cvel[body_id, 3:].copy()
+            ref_angv[body_id] = self.data.cvel[body_id, :3].copy()
+
+        # restore
+        self.data.qpos[:] = q_pos_curr
+        self.data.qvel[:] = q_vel_curr
+        mujoco.mj_forward(self.model, self.data)
+
+        #body position tracking reward
+        
+        p_b_errors = []
+        for body_id in self.target_bodies:
+            p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
+        r_pos = np.exp(-np.mean(p_b_errors)/0.3**2)
+
+        #body orientation tracking reward
+        o_b_errors = []
+        for body_id in self.target_bodies:
+            R_curr = current_rot[body_id]
+            R_ref = ref_rot[body_id]
+            R_rel = R_ref @ R_curr.T
+            cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
+            angle = np.arccos(cos_angle)
+            o_b_errors.append(angle**2)
+        r_ori = np.exp(-np.mean(o_b_errors)/0.4**2)
+
+        #body linear velocity tracking reward
+        v_b_errors = []
+        for body_id in self.target_bodies:
+            v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
+        r_vel = np.exp(-np.mean(v_b_errors)/1.0**2)
+
+        #body angular velocity tracking reward
+        av_b_errors = []
+        for body_id in self.target_bodies:
+            av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
+        r_angv = np.exp(-np.mean(av_b_errors)/3.14**2)
+
+        #action penalty
+        r_action = np.linalg.norm(action - self.last_action)**2
+        
+        #joint pos limits penalty
+        l_limit = self.model.jnt_range[1:, 0]
+        u_limit = self.model.jnt_range[1:, 1]
+        
+        theta_i = self.data.qpos[7:]
+
+        limit_error = []
+        for i in range(self.model.nu):
+            limit_error.append(max(0, theta_i[i] - u_limit[i]) + max(0, l_limit[i] - theta_i[i]))
+        
+        r_limit = np.sum(limit_error)
+
+        #self contact reward is not being included for now.
+        r_self_contact = 0
+
+        #combine all rewards with weights
+        reward = (self.w_pos * r_pos + 
+                  self.w_ori * r_ori + 
+                  self.w_vel * r_vel + 
+                  self.w_angv * r_angv + 
+                  self.w_action * r_action + 
+                  self.w_limit * r_limit + 
+                  self.w_self_contact * r_self_contact)
+        
+        return reward
+            
+    
 
     def _is_terminated(self):
         """
