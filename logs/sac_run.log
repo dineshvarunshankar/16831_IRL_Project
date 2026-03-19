@@ -1,0 +1,173 @@
+nohup: ignoring input
+/opt/pytorch/lib/python3.13/site-packages/torch/cuda/__init__.py:65: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/ubuntu/.netrc.
+wandb: Currently logged in as: vkalva (vkalva-carnegie-mellon-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 8ry7ki72
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/ubuntu/16831_IRL_Project/wandb/run-20260319_052045-8ry7ki72
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run sac_walk1
+wandb: ⭐️ View project at https://wandb.ai/vkalva-carnegie-mellon-university/locomimic
+wandb: 🚀 View run at https://wandb.ai/vkalva-carnegie-mellon-university/locomimic/runs/8ry7ki72
+wandb: uploading history steps 118453-118575, summary; updating run metadata
+wandb: uploading history steps 118453-118575, summary; uploading output.log
+wandb: uploading history steps 118576-118634, summary
+wandb: 
+wandb: Run history:
+wandb:        episode ▁▁▁▁▁▁▂▂▂▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇█████
+wandb: episode_return ▆▅▅▄▅▇▅▆▆▅▇▁▇▇▃▆▅▇▆▅▇▆▇▅▇▅▇▇▇▆▃▂▆▆█▇▇▇▅▇
+wandb:  episode_steps ▂▄▃▃▁▁▆▃▂▂▂▂▃▃▄▁▄▁▃▃▂▂▆▃▂▄▃▂▅▂▃▂▃▄▃▃█▂▂▄
+wandb:           step ▁▁▁▁▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▆▆▆▇▇▇▇▇█
+wandb: 
+wandb: Run summary:
+wandb:        episode 118634
+wandb: episode_return 2.20606
+wandb:  episode_steps 5
+wandb:           step 999992
+wandb: 
+wandb: 🚀 View run sac_walk1 at: https://wandb.ai/vkalva-carnegie-mellon-university/locomimic/runs/8ry7ki72
+wandb: ⭐️ View project at: https://wandb.ai/vkalva-carnegie-mellon-university/locomimic
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260319_052045-8ry7ki72/logs
+Device : cuda
+Training for 1000000 steps
+Step       0 | Episode    0 | Return     1.02 | Steps    1
+Step    7144 | Episode 1000 | Return    -1.75 | Steps   12
+Step   14277 | Episode 2000 | Return     1.78 | Steps   12
+Step   22226 | Episode 3000 | Return    -1.08 | Steps   12
+Step   30054 | Episode 4000 | Return     2.45 | Steps    3
+Step   37633 | Episode 5000 | Return     3.25 | Steps   12
+Step   45280 | Episode 6000 | Return     3.91 | Steps    6
+Saved checkpoint at step 50000
+Step   52809 | Episode 7000 | Return     2.55 | Steps    3
+Step   60699 | Episode 8000 | Return    -4.92 | Steps    9
+Step   68454 | Episode 9000 | Return     4.63 | Steps    9
+Step   76519 | Episode 10000 | Return    -0.95 | Steps    9
+Step   84663 | Episode 11000 | Return     1.75 | Steps    9
+Step   92967 | Episode 12000 | Return     5.82 | Steps    9
+Saved checkpoint at step 100000
+Step  101019 | Episode 13000 | Return     2.33 | Steps    8
+Step  109033 | Episode 14000 | Return     5.77 | Steps   10
+Step  116830 | Episode 15000 | Return     4.71 | Steps   10
+Step  124878 | Episode 16000 | Return    -2.95 | Steps   18
+Step  132798 | Episode 17000 | Return     5.91 | Steps   11
+Step  140826 | Episode 18000 | Return     0.35 | Steps    6
+Step  149110 | Episode 19000 | Return     2.32 | Steps    7
+Saved checkpoint at step 150000
+Step  157301 | Episode 20000 | Return     4.44 | Steps    8
+Step  165335 | Episode 21000 | Return    -0.10 | Steps   11
+Step  173522 | Episode 22000 | Return     2.50 | Steps    5
+Step  181844 | Episode 23000 | Return     3.23 | Steps   13
+Step  189994 | Episode 24000 | Return     4.06 | Steps    6
+Step  198067 | Episode 25000 | Return     3.17 | Steps    4
+Saved checkpoint at step 200000
+Step  206462 | Episode 26000 | Return     2.18 | Steps   15
+Step  214576 | Episode 27000 | Return     3.76 | Steps    6
+Step  222780 | Episode 28000 | Return     4.21 | Steps    6
+Step  230824 | Episode 29000 | Return     0.84 | Steps   10
+Step  238984 | Episode 30000 | Return    12.02 | Steps   20
+Step  247182 | Episode 31000 | Return     7.93 | Steps   14
+Saved checkpoint at step 250000
+Step  255361 | Episode 32000 | Return     3.42 | Steps    6
+Step  263673 | Episode 33000 | Return     0.49 | Steps    7
+Step  272083 | Episode 34000 | Return     3.29 | Steps    5
+Step  280680 | Episode 35000 | Return     3.54 | Steps    5
+Step  289014 | Episode 36000 | Return     2.36 | Steps   10
+Step  297649 | Episode 37000 | Return     1.77 | Steps   11
+Saved checkpoint at step 300000
+Step  305949 | Episode 38000 | Return     5.68 | Steps    8
+Step  314337 | Episode 39000 | Return     4.46 | Steps    7
+Step  322727 | Episode 40000 | Return     4.74 | Steps    7
+Step  331011 | Episode 41000 | Return     7.46 | Steps   12
+Step  339448 | Episode 42000 | Return     7.04 | Steps   14
+Step  347878 | Episode 43000 | Return    -0.39 | Steps    6
+Saved checkpoint at step 350000
+Step  356333 | Episode 44000 | Return     4.52 | Steps    7
+Step  364641 | Episode 45000 | Return     3.88 | Steps   12
+Step  373101 | Episode 46000 | Return     7.46 | Steps   11
+Step  381433 | Episode 47000 | Return     2.34 | Steps    7
+Step  389884 | Episode 48000 | Return     0.72 | Steps    6
+Step  398207 | Episode 49000 | Return     4.22 | Steps    6
+Saved checkpoint at step 400000
+Step  406569 | Episode 50000 | Return     4.88 | Steps   10
+Step  414956 | Episode 51000 | Return     6.88 | Steps   13
+Step  423510 | Episode 52000 | Return     3.68 | Steps    5
+Step  431922 | Episode 53000 | Return     5.07 | Steps   10
+Step  440353 | Episode 54000 | Return     5.68 | Steps   10
+Step  448737 | Episode 55000 | Return     4.00 | Steps    7
+Saved checkpoint at step 450000
+Step  457312 | Episode 56000 | Return     3.31 | Steps    4
+Step  465967 | Episode 57000 | Return     3.20 | Steps    7
+Step  474548 | Episode 58000 | Return     3.93 | Steps    5
+Step  482914 | Episode 59000 | Return     4.81 | Steps    9
+Step  491401 | Episode 60000 | Return     4.76 | Steps    6
+Step  499911 | Episode 61000 | Return     5.95 | Steps   10
+Saved checkpoint at step 500000
+Step  508472 | Episode 62000 | Return     2.24 | Steps    8
+Step  516998 | Episode 63000 | Return     2.03 | Steps   11
+Step  525346 | Episode 64000 | Return     2.57 | Steps    3
+Step  533757 | Episode 65000 | Return     4.79 | Steps   13
+Step  542327 | Episode 66000 | Return     7.84 | Steps   10
+Saved checkpoint at step 550000
+Step  550979 | Episode 67000 | Return     5.09 | Steps   12
+Step  559570 | Episode 68000 | Return     4.16 | Steps    6
+Step  568069 | Episode 69000 | Return     2.61 | Steps   11
+Step  576828 | Episode 70000 | Return     6.19 | Steps   10
+Step  585407 | Episode 71000 | Return     4.94 | Steps   10
+Step  593815 | Episode 72000 | Return     4.51 | Steps    7
+Saved checkpoint at step 600000
+Step  602404 | Episode 73000 | Return     4.72 | Steps   10
+Step  610758 | Episode 74000 | Return     3.47 | Steps    4
+Step  619280 | Episode 75000 | Return     4.80 | Steps   10
+Step  627866 | Episode 76000 | Return     4.45 | Steps    6
+Step  636508 | Episode 77000 | Return     3.40 | Steps    8
+Step  645176 | Episode 78000 | Return     2.21 | Steps   11
+Saved checkpoint at step 650000
+Step  653759 | Episode 79000 | Return     3.45 | Steps    4
+Step  662412 | Episode 80000 | Return    -0.64 | Steps   12
+Step  671032 | Episode 81000 | Return     5.13 | Steps    9
+Step  679846 | Episode 82000 | Return     3.85 | Steps    8
+Step  688670 | Episode 83000 | Return     2.73 | Steps    3
+Step  697193 | Episode 84000 | Return     4.73 | Steps   10
+Saved checkpoint at step 700000
+Step  705771 | Episode 85000 | Return     5.03 | Steps    7
+Step  714323 | Episode 86000 | Return     2.89 | Steps   12
+Step  723115 | Episode 87000 | Return     3.32 | Steps    9
+Step  731626 | Episode 88000 | Return     5.79 | Steps   11
+Step  740192 | Episode 89000 | Return     3.77 | Steps    5
+Step  748982 | Episode 90000 | Return     4.92 | Steps    8
+Saved checkpoint at step 750000
+Step  757744 | Episode 91000 | Return     1.41 | Steps   13
+Step  766298 | Episode 92000 | Return     4.68 | Steps    6
+Step  775091 | Episode 93000 | Return     1.08 | Steps    9
+Step  783777 | Episode 94000 | Return    -4.39 | Steps   13
+Step  792311 | Episode 95000 | Return     3.73 | Steps    5
+Saved checkpoint at step 800000
+Step  800991 | Episode 96000 | Return     7.08 | Steps   13
+Step  809646 | Episode 97000 | Return     3.71 | Steps    9
+Step  818408 | Episode 98000 | Return     3.03 | Steps   12
+Step  827039 | Episode 99000 | Return     3.72 | Steps    6
+Step  835777 | Episode 100000 | Return     6.53 | Steps   13
+Step  844462 | Episode 101000 | Return     3.98 | Steps    6
+Saved checkpoint at step 850000
+Step  853244 | Episode 102000 | Return     5.83 | Steps   12
+Step  861882 | Episode 103000 | Return     5.38 | Steps   13
+Step  870752 | Episode 104000 | Return     4.89 | Steps    8
+Step  879416 | Episode 105000 | Return     4.56 | Steps    6
+Step  888117 | Episode 106000 | Return     5.92 | Steps    9
+Step  896770 | Episode 107000 | Return     3.94 | Steps    9
+Saved checkpoint at step 900000
+Step  905611 | Episode 108000 | Return     4.76 | Steps    7
+Step  914333 | Episode 109000 | Return     4.56 | Steps   10
+Step  923102 | Episode 110000 | Return     1.74 | Steps    7
+Step  931980 | Episode 111000 | Return     5.42 | Steps   10
+Step  941093 | Episode 112000 | Return     4.27 | Steps    6
+Saved checkpoint at step 950000
+Step  950063 | Episode 113000 | Return     6.52 | Steps   12
+Step  959104 | Episode 114000 | Return     4.65 | Steps    6
+Step  967959 | Episode 115000 | Return     3.06 | Steps   10
+Step  976692 | Episode 116000 | Return     3.15 | Steps    4
+Step  985597 | Episode 117000 | Return     4.03 | Steps    5
+Step  994498 | Episode 118000 | Return     5.69 | Steps   10
+Training complete.
