@@ -9,11 +9,11 @@ from train.replay_buffer import ReplayBuffer
 
 class SACAgent(BaseAgent):
     def __init__(self, obs_dim, act_dim, config):
-        self.actor = Actor(obs_dim, act_dim, config.actor_hidden_dim)
-        self.critic = DoubleCritic(obs_dim, act_dim, config.critic_hidden_dim) 
+        self.actor = Actor(obs_dim, act_dim, config.actor_hidden_dim).to(config.device)
+        self.critic = DoubleCritic(obs_dim, act_dim, config.critic_hidden_dim).to(config.device) 
 
         # target critic, no gradients
-        self.critic_target = DoubleCritic(obs_dim, act_dim, config.critic_hidden_dim)
+        self.critic_target = DoubleCritic(obs_dim, act_dim, config.critic_hidden_dim).to(config.device)
         self.critic_target.load_state_dict(self.critic.state_dict()) #identical networks 
 
         # opt
@@ -22,7 +22,7 @@ class SACAgent(BaseAgent):
 
         # entropy temperature autotuning
         self.target_entropy = -act_dim  # heuristic: -dim(action)
-        self.log_alpha      = torch.zeros(1, requires_grad=True)
+        self.log_alpha      = torch.zeros(1, requires_grad=True, device=config.device)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=config.lr)
 
         # replay buffer
@@ -54,11 +54,11 @@ class SACAgent(BaseAgent):
     
     def update(self):
         # do not update if buffer is not full
-        if len(self.buffer) < self.config.buffer_size:
+        if len(self.buffer) < self.config.batch_size:
             return
 
         # sample from the buffer to update
-        s, a, r, s_next, done = self.buffer.sample(self.config.buffer_size)
+        s, a, r, s_next, done = self.buffer.sample(self.config.batch_size)
 
         # send everything to device
         s = s.to(self.device)
@@ -82,7 +82,7 @@ class SACAgent(BaseAgent):
 
             alpha = self.log_alpha.exp()
 
-            y = r + self.config.gamma * (self.critic.min_Q(s_next, a_next) - alpha*log_prob) * (1 - done)
+            y = r + self.config.gamma * (self.critic_target.min_Q(s_next, a_next) - alpha*log_prob) * (1 - done)
 
         q1, q2 = self.critic(s, a) #forward
         critic_loss = F.mse_loss(q1, y) + F.mse_loss(q2, y)
@@ -117,7 +117,7 @@ class SACAgent(BaseAgent):
             self.critic.parameters(),
             self.critic_target.parameters()
         ):
-            target_param.data.copy(tau * param.data + (1 - tau) * target_param.data)
+            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
      
     def save(self, path):
         torch.save({
@@ -137,5 +137,5 @@ class SACAgent(BaseAgent):
         self.critic_target.load_state_dict(checkpoint['critic_target'])
         self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer'])
         self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer'])
-        self.log_alpha = checkpoint['log_alpha']
+        self.log_alpha.data.copy_(checkpoint['log_alpha'].data)
         self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer'])

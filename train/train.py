@@ -59,7 +59,7 @@ def train(config_path='train/configs/sac_config.yaml'):
                 'step'           : step,
             })
             
-            if episode_num % 10 == 0:  # print every 10 episodes
+            if episode_num % 1000 == 0:  # print every 1000 episodes
                 print(f'Step {step:7d} | Episode {episode_num:4d} | '
                 f'Return {episode_return:8.2f} | Steps {episode_steps:4d}')
             
