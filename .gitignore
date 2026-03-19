@@ -5,8 +5,8 @@ logs/
 videos/
 
 # External repos
-mujoco_menagerie/
-unitree_mujoco/
+# mujoco_menagerie/
+# unitree_mujoco/
 
 # wandb
 wandb/
