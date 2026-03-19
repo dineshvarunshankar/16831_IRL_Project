@@ -53,25 +53,22 @@ class SACAgent(BaseAgent):
         self.buffer.add(state, action, reward, next_state, done)
     
     def update(self):
-        # do not update if buffer is not full
         if len(self.buffer) < self.config.batch_size:
             return
 
-        # sample from the buffer to update
-        s, a, r, s_next, done = self.buffer.sample(self.config.batch_size)
+        for _ in range(self.config.gradient_steps):
+            s, a, r, s_next, done = self.buffer.sample(self.config.batch_size)
 
-        # send everything to device
-        s = s.to(self.device)
-        a      = a.to(self.device)
-        r      = r.to(self.device)
-        s_next = s_next.to(self.device)
-        done   = done.to(self.device)
+            s      = s.to(self.device)
+            a      = a.to(self.device)
+            r      = r.to(self.device)
+            s_next = s_next.to(self.device)
+            done   = done.to(self.device)
 
-        # updates using helper functions defined below
-        self._update_critic(s, a, r, s_next, done)
-        self._update_actor(s)
-        self._update_alpha(s)
-        self._soft_update_targets()
+            self._update_critic(s, a, r, s_next, done)
+            self._update_actor(s)
+            self._update_alpha(s)
+            self._soft_update_targets()
 
 
     

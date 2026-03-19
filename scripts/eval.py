@@ -14,7 +14,7 @@ args = parser.parse_args()
 
 config = load_config(args.config)
 env = LocoMimicEnv(config.motion_path, render_mode='human' if args.render else None)
-agent = SACAgent(obs_dim=123, act_dim=29, config=config)
+agent = SACAgent(obs_dim=139, act_dim=29, config=config)
 agent.load(args.checkpoint)
 
 episode_returns = []

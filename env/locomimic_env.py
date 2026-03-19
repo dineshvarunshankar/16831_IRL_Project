@@ -38,9 +38,10 @@ class LocoMimicEnv(gym.Env):
         run episodes is initialized here.
         """
 
-        # load mujoco model 
+        # load mujoco model
         self.model = mujoco.MjModel.from_xml_path(G1_XML)
         self.data = mujoco.MjData(self.model)
+        self.ref_data = mujoco.MjData(self.model)  # separate data for reference FK
 
         # load motion reference clip
         self.motion = MotionClip(motion_clip_path)
@@ -70,21 +71,24 @@ class LocoMimicEnv(gym.Env):
 
         # observation space
         """
-        TODO We need to figure out the observation space: based on existing work on G1. 
-        But for now we use:
-
-        robot joint pos  (29,)
-        robot joint vel  (29,)
-        robot root vel   (3,)
-        ref joint pos    (29,)
-        ref joint vel    (29,)
-        ref root vel     (3,)
-        phase            (1,)
+        robot root height (1,)
+        robot root quat   (4,)
+        robot joint pos   (29,)
+        robot joint vel   (29,)
+        robot root vel    (3,)
+        robot root angvel (3,)
+        ref root height   (1,)
+        ref root quat     (4,)
+        ref joint pos     (29,)
+        ref joint vel     (29,)
+        ref root vel      (3,)
+        ref root angvel   (3,)
+        phase             (1,)
         ─────────────────────
-        total            (123,)
+        total             (139,)
         """
 
-        obs_dim = 123
+        obs_dim = 139
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf,
             shape=(obs_dim,),
@@ -158,11 +162,11 @@ class LocoMimicEnv(gym.Env):
         
         self.n_steps += 1
         self.phase = (self.phase + 1) % len(self.motion)
-        self.last_action = action.copy()
 
         #returns 
         obs = self._get_obs()
         reward = self._compute_reward(action)
+        self.last_action = action.copy()
         terminated = self._is_terminated()
         truncated = self.n_steps >= self.max_steps
         info = {}
@@ -177,40 +181,48 @@ class LocoMimicEnv(gym.Env):
         compute the error and correct itself.
         """
 
-        # get robot state from mujoco 
-        joint_pos = self.data.qpos[7:]       
-        joint_vel = self.data.qvel[6:]        
-        root_vel  = self.data.qvel[0:3] 
+        # get robot state from mujoco
+        root_height = self.data.qpos[2:3]
+        root_quat   = self.data.qpos[3:7]
+        joint_pos   = self.data.qpos[7:]
+        root_vel    = self.data.qvel[0:3]
+        root_angvel = self.data.qvel[3:6]
+        joint_vel   = self.data.qvel[6:]
 
         # get ref pose from motion clip
         ref_qpos = self.motion.get_qpos(self.phase)
         ref_qvel = self.motion.get_qvel(self.phase)
 
-        # extract joint pos, vel and root vel
-        ref_joint_pos = ref_qpos[7:]         
-        ref_joint_vel = ref_qvel[6:]          
-        ref_root_vel  = ref_qvel[0:3] 
-        
-        phase_norm = np.array([self.phase / len(self.motion)]) #normalized phase for obs
+        ref_root_height = ref_qpos[2:3]
+        ref_root_quat   = ref_qpos[3:7]
+        ref_joint_pos   = ref_qpos[7:]
+        ref_root_vel    = ref_qvel[0:3]
+        ref_root_angvel = ref_qvel[3:6]
+        ref_joint_vel   = ref_qvel[6:]
+
+        phase_norm = np.array([self.phase / len(self.motion)])
 
         obs = np.concatenate([
+            root_height,
+            root_quat,
             joint_pos,
             joint_vel,
             root_vel,
+            root_angvel,
+            ref_root_height,
+            ref_root_quat,
             ref_joint_pos,
             ref_joint_vel,
             ref_root_vel,
+            ref_root_angvel,
             phase_norm
         ]).astype(np.float32)
 
         return obs
 
     def _compute_reward(self, action):
-        
-        # current body positions
-        q_pos_curr = self.data.qpos.copy()
-        q_vel_curr = self.data.qvel.copy()
-        
+
+        # current body positions (from live sim, no mutation)
         current_pos = {}
         current_rot = {}
         current_vel = {}
@@ -219,28 +231,23 @@ class LocoMimicEnv(gym.Env):
         for body_id in self.target_bodies:
             current_pos[body_id] = self.data.xpos[body_id].copy()
             current_rot[body_id] = self.data.xmat[body_id].reshape(3, 3).copy()
-            current_vel[body_id] = self.data.cvel[body_id, 3:].copy()  
+            current_vel[body_id] = self.data.cvel[body_id, 3:].copy()
             current_ang_vel[body_id] = self.data.cvel[body_id, 0:3].copy()
 
-        # set to reference
-        self.data.qpos[:] = self.motion.get_qpos(self.phase)
-        self.data.qvel[:] = self.motion.get_qvel(self.phase)
-        mujoco.mj_forward(self.model, self.data)
+        # reference body positions (computed on separate MjData)
+        self.ref_data.qpos[:] = self.motion.get_qpos(self.phase)
+        self.ref_data.qvel[:] = self.motion.get_qvel(self.phase)
+        mujoco.mj_forward(self.model, self.ref_data)
 
         ref_pos  = {}
         ref_rot  = {}
         ref_linv = {}
         ref_angv = {}
         for body_id in self.target_bodies:
-            ref_pos[body_id]  = self.data.xpos[body_id].copy()
-            ref_rot[body_id]  = self.data.xmat[body_id].reshape(3, 3).copy()
-            ref_linv[body_id] = self.data.cvel[body_id, 3:].copy()
-            ref_angv[body_id] = self.data.cvel[body_id, :3].copy()
-
-        # restore
-        self.data.qpos[:] = q_pos_curr
-        self.data.qvel[:] = q_vel_curr
-        mujoco.mj_forward(self.model, self.data)
+            ref_pos[body_id]  = self.ref_data.xpos[body_id].copy()
+            ref_rot[body_id]  = self.ref_data.xmat[body_id].reshape(3, 3).copy()
+            ref_linv[body_id] = self.ref_data.cvel[body_id, 3:].copy()
+            ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
 
         #body position tracking reward
         
@@ -332,23 +339,12 @@ class LocoMimicEnv(gym.Env):
     def _apply_pd_control(self, action):
         """
         Converts the policy's action (normalized joint position targets) into
-        actual torques sent to the robot. The PD controller acts like a spring-
-        damper on each joint — pulling it toward the target position while
-        resisting fast movements. The policy never commands torques directly,
-        it only says where it wants each joint to be.
+        actual torques sent to the robot.
         """
 
         target_pos = self.default_joint_pos + action * self.action_scale 
 
-        pos_error = target_pos - self.data.qpos[7:]
-        vel_error = -self.data.qvel[6:] # no ref error since we are not tracking vels  
-
-        torques   = self.kp * pos_error + self.kd * vel_error
-
-        ctrl_range = self.model.actuator_ctrlrange
-        torques    = np.clip(torques, ctrl_range[:, 0], ctrl_range[:, 1])
-
-        self.data.ctrl[:] =  torques
+        self.data.ctrl[:] =  target_pos #mujoco position actuators will handle the torques
 
     def close(self):
         """

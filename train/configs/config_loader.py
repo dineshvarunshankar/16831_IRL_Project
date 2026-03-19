@@ -13,6 +13,7 @@ class SACConfig:
     buffer_size       : int
     total_steps       : int
     learning_starts   : int
+    gradient_steps    : int
     log_freq          : int
     save_freq         : int
     device            : str = 'cpu'

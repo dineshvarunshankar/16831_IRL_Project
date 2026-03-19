@@ -18,7 +18,7 @@ def train(config_path='train/configs/sac_config.yaml'):
 
     # create env and agent
     env   = LocoMimicEnv(config.motion_path)
-    agent = SACAgent(obs_dim=123, act_dim=29, config=config)
+    agent = SACAgent(obs_dim=139, act_dim=29, config=config)
 
     # create directories
     os.makedirs('models', exist_ok=True)
