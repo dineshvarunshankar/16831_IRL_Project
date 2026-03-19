@@ -115,7 +115,7 @@ class LocoMimicEnv(gym.Env):
         self.w_vel = 1.0
         self.w_angv = 1.0
         self.w_action = -0.1
-        self.w_limit = -10.0
+        self.w_limit = -1.0
         self.w_self_contact = -0.1
 
     def reset(self, seed=None, options=None):
