@@ -116,17 +116,24 @@ class LocoMimicEnv(gym.Env):
         # range(1, self.model.nbody) - returns a list of body indices starting from 1 to nbody-1. 0 - is the world body(scene, ground, etc. which doesnt have to imitate anything)
         self.target_bodies = list(range(1, self.model.nbody))
 
-        #reward weights
-        self.w_pos = 1.0
-        self.w_ori = 1.0
-        self.w_vel = 1.0
-        self.w_angv = 1.0
-        self.w_action = -0.1
-        #joint angles outside limits penalty
-        self.w_limit = -1.0
-        #TODO
-        #own geoms/bodies touching each other (not implemented?)
-        self.w_self_contact = -0.1
+        # Reward weights (sum to 1.0 for tracking terms) - Inspired by DeepMimic
+        self.w_pos = 0.5      # body position tracking
+        self.w_ori = 0.2      # body orientation tracking  
+        self.w_vel = 0.1      # linear velocity tracking
+        self.w_angv = 0.2     # angular velocity tracking
+
+        # penalty weights (kept small so tracking signal dominates)
+        self.w_action = -0.01     # action smoothness penalty (was -0.1)
+        self.w_limit = -0.1       # joint limit violation penalty (was -1.0)
+        self.w_self_contact = 0.0 # not implemented yet
+
+        # curriculum termination thresholds — start lenient, tighten over training
+        self.init_height_threshold = 0.5  # initial: allow 50cm deviation from ref
+        self.init_ori_threshold = 1.2     # initial: ~69 degrees from ref orientation
+        self.min_height_threshold = 0.2   # tighten to 20cm 
+        self.min_ori_threshold = 0.6      # tighten to ~34 degrees
+        self.height_threshold = self.init_height_threshold
+        self.ori_threshold = self.init_ori_threshold
 
     def reset(self, seed=None, options=None):
         """
@@ -237,6 +244,12 @@ class LocoMimicEnv(gym.Env):
         return obs
 
     def _compute_reward(self, action):
+        """
+        Reward inspired by DeepMimic:
+        Weighted sum of exponential tracking rewards with tight kernels.
+        Each sub-reward is in [0, 1], weights sum to 1.0, so total tracking
+        reward is in [0, 1]. Small penalties are added on top.
+        """
 
         # current body positions (from live sim, no mutation)
         current_pos = {}
@@ -265,15 +278,15 @@ class LocoMimicEnv(gym.Env):
             ref_linv[body_id] = self.ref_data.cvel[body_id, 3:].copy()
             ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
 
-        #body position tracking reward
+        # body position tracking reward
         p_b_errors = []
         for body_id in self.target_bodies:
             p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
-        #Gaussian Kernel/RBF - normalized version of mean squared error with std dev of 0.3
-        # reward is 1 when error is 0 and decreases as error increases
-        r_pos = np.exp(-np.mean(p_b_errors)/0.3**2)
+        
+        #Gaussian Kernel/RBF - normalized version of mean squared error
+        r_pos = np.exp(-10.0 * np.mean(p_b_errors))  # was /0.3² ≈ /0.09 ≈ *11 — now explicit *10
 
-        #body orientation tracking reward
+        # body orientation tracking reward
         o_b_errors = []
         for body_id in self.target_bodies:
             R_curr = current_rot[body_id]
@@ -282,47 +295,44 @@ class LocoMimicEnv(gym.Env):
             cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
             angle = np.arccos(cos_angle)
             o_b_errors.append(angle**2)
-        r_ori = np.exp(-np.mean(o_b_errors)/0.4**2)
+        r_ori = np.exp(-5.0 * np.mean(o_b_errors))  # was /0.4² ≈ *6.25 — now *5
 
-        #body linear velocity tracking reward
+        # body linear velocity tracking reward
         v_b_errors = []
         for body_id in self.target_bodies:
             v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
-        r_vel = np.exp(-np.mean(v_b_errors)/1.0**2)
+        r_vel = np.exp(-2.0 * np.mean(v_b_errors))  # was /1.0² ≈ *1 — now *2
 
-        #body angular velocity tracking reward
+        # body angular velocity tracking reward
         av_b_errors = []
         for body_id in self.target_bodies:
             av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
-        r_angv = np.exp(-np.mean(av_b_errors)/3.14**2)
+        r_angv = np.exp(-1.0 * np.mean(av_b_errors))  # was /3.14² ≈ *0.1 — now *1
 
-        #action penalty
+        # tracking reward: weighted sum, bounded in [0, 1]
+        r_tracking = (self.w_pos * r_pos + 
+                      self.w_ori * r_ori + 
+                      self.w_vel * r_vel + 
+                      self.w_angv * r_angv)
+
+        # action smoothness penalty
         r_action = np.linalg.norm(action - self.last_action)**2
         
         #joint pos limits penalty
         #first joint is ignored as it is a free joint of the robot/root
         l_limit = self.model.jnt_range[1:, 0]
         u_limit = self.model.jnt_range[1:, 1]
-        
         theta_i = self.data.qpos[7:]
 
         limit_error = []
         for i in range(self.model.nu):
             limit_error.append(max(0, theta_i[i] - u_limit[i]) + max(0, l_limit[i] - theta_i[i]))
-        
         r_limit = np.sum(limit_error)
 
-        #self contact reward is not being included for now.
-        r_self_contact = 0
+        r_penalties = self.w_action * r_action + self.w_limit * r_limit 
 
-        #combine all rewards with weights
-        reward = (self.w_pos * r_pos + 
-                  self.w_ori * r_ori + 
-                  self.w_vel * r_vel + 
-                  self.w_angv * r_angv + 
-                  self.w_action * r_action + 
-                  self.w_limit * r_limit + 
-                  self.w_self_contact * r_self_contact)
+        # combine: tracking (dominant) + small penalties
+        reward = r_tracking + r_penalties
         
         return reward
             
@@ -334,14 +344,17 @@ class LocoMimicEnv(gym.Env):
         height or orientation deviates too far from the reference, meaning
         the robot has effectively fallen or lost balance beyond recovery.
         Early termination gives the policy a strong signal that these states
-        are bad, which speeds up learning. Room for tuning here.
+        are bad, which speeds up learning.
+        
+        Uses curriculum thresholds that start lenient and tighten over
+        training via update_curriculum().
         """
 
         ref_qpos = self.motion.get_qpos(self.phase)
 
-        # condition 1: height deviation from reference
+        # condition 1: height deviation from reference (curriculum threshold)
         height_err = abs(self.data.qpos[2] - ref_qpos[2])
-        if height_err > 0.25:
+        if height_err > self.height_threshold:
             return True
 
         # condition 2: root orientation too far from reference
@@ -350,19 +363,41 @@ class LocoMimicEnv(gym.Env):
         #dot product of quaternions gives the cosine of half the angle between the two quaternions
         #we take absolute value because quaternions q and -q represent the same rotation
         dot = np.abs(np.dot(robot_quat, ref_quat))
-        if dot < np.cos(0.8 / 2):
+        if dot < np.cos(self.ori_threshold / 2):
             return True
 
         return False
+
+    def update_curriculum(self, progress):
+        """
+        Update termination thresholds based on training progress.
+        
+        Args:
+            progress: float in [0, 1], where 0 = start of training, 1 = end.
+                      Computed as current_step / total_steps in train.py.
+        
+        Linearly interpolates from initial (lenient) to minimum (strict) thresholds.
+        Early in training, robot gets more room to deviate and learn.
+        Later, it must track the reference more precisely.
+        """
+        self.height_threshold = self.init_height_threshold + progress * (
+            self.min_height_threshold - self.init_height_threshold)
+        self.ori_threshold = self.init_ori_threshold + progress * (
+            self.min_ori_threshold - self.init_ori_threshold)
   
 
     def _apply_pd_control(self, action):
         """
         Converts the policy's action (normalized joint position targets) into
         actual torques sent to the robot.
+        Actions are offsets from the REFERENCE pose at the current phase,
+        not from the default standing pose.
+        This simplifies what the policy must learn.
+        (DeepMimic: PD targets centered on reference kinematic pose)
         """
 
-        target_pos = self.default_joint_pos + action * self.action_scale 
+        ref_joint_pos = self.motion.get_qpos(self.phase)[7:]  # reference joint positions at current phase
+        target_pos = ref_joint_pos + action * self.action_scale 
 
         self.data.ctrl[:] =  target_pos #mujoco position actuators will handle the torques
 

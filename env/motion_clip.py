@@ -49,6 +49,41 @@ class MotionClip:
         self.root_vel[0]    = (self.root_pos[1]  - self.root_pos[0])   / self.dt
         self.root_vel[-1]   = (self.root_pos[-1] - self.root_pos[-2])  / self.dt
 
+        # compute root angular velocity from quaternion differences (body/local frame)
+        # MuJoCo's qvel[3:6] for free joints is in the local body frame
+        # ω_body = 2 * (q_prev⁻¹ ⊗ q_curr).xyz / dt
+        self.root_angvel = np.zeros((self.n_frames, 3))
+        for i in range(1, self.n_frames):
+            q_prev = self.root_quat[i - 1]  # [w, x, y, z]
+            q_curr = self.root_quat[i]
+
+            # ensure shortest path (quaternion double cover: q and -q are the same rotation)
+            if np.dot(q_prev, q_curr) < 0:
+                q_curr = -q_curr
+
+            # body-frame angular velocity
+            q_diff = self._quat_multiply(self._quat_conjugate(q_prev), q_curr)
+            self.root_angvel[i] = 2.0 * q_diff[1:4] / self.dt
+
+        self.root_angvel[0] = self.root_angvel[1]  # copy forward for first frame
+
+    @staticmethod
+    def _quat_conjugate(q):
+        """q = [w, x, y, z] → q* = [w, -x, -y, -z]"""
+        return np.array([q[0], -q[1], -q[2], -q[3]])
+
+    @staticmethod
+    def _quat_multiply(q1, q2):
+        """Hamilton product: q1 ⊗ q2, both in [w, x, y, z] format"""
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+        return np.array([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2,
+        ])
+
     def get_qpos(self, frame_idx):
         frame_idx = frame_idx % self.n_frames
         qpos = np.zeros(36) # 3 (root pos) + 4 (quaternion) + 29 (joints)
@@ -61,7 +96,7 @@ class MotionClip:
         frame_idx = frame_idx % self.n_frames
         qvel = np.zeros(35) # 3 (root lin) + 3 (root ang) + 29 (joints)
         qvel[0:3] = self.root_vel[frame_idx]
-        qvel[3:6] = 0.0 # angular velocity set to 0 
+        qvel[3:6] = self.root_angvel[frame_idx]  # computed from quaternion differences
         qvel[6:35] = self.joint_vel[frame_idx]
         return qvel
 

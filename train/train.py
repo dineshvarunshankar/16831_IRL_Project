@@ -72,6 +72,13 @@ def train(config_path='train/configs/sac_config.yaml'):
             agent.save(f'models/sac_step_{step}.pt')
             print(f'Saved checkpoint at step {step}')
 
+        # update curriculum termination thresholds every 100K steps
+        if step % 100000 == 0 and step > 0:
+            progress = step / config.total_steps
+            env.update_curriculum(progress)
+            print(f'Curriculum updated: height_thresh={env.height_threshold:.3f}, '
+                  f'ori_thresh={env.ori_threshold:.3f}')
+
     agent.save('models/sac_final.pt')
     wandb.finish()
     print('Training complete.')   
