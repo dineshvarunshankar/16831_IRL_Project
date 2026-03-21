@@ -27,7 +27,7 @@ class MotionClip:
         self.root_pos = raw[:, 0:3]
         root_quat_xyzw = raw[:, 3:7]
 
-        # convert to mujoco format (w,x,y,z)
+        # convert to mujoco format (w,x,y,z) - hamiltoninan convention
         self.root_quat = np.concatenate([
             root_quat_xyzw[:, 3:4],
             root_quat_xyzw[:, 0:3]
@@ -35,9 +35,13 @@ class MotionClip:
 
         self.joint_pos = raw[:, 7:36]
 
+        # compute joint velocities using central difference theorem (CSV only has poses)
         self.joint_vel = np.zeros_like(self.joint_pos)
+        # central difference for all frames except first and last
         self.joint_vel[1:-1] = (self.joint_pos[2:] - self.joint_pos[:-2]) / (2 * self.dt)
+        # forward difference for first frame
         self.joint_vel[0]    = (self.joint_pos[1]  - self.joint_pos[0])   / self.dt
+        # backward difference for last frame
         self.joint_vel[-1]   = (self.joint_pos[-1] - self.joint_pos[-2])  / self.dt
 
         self.root_vel = np.zeros_like(self.root_pos)

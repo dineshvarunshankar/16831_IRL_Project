@@ -56,13 +56,15 @@ class LocoMimicEnv(gym.Env):
         self.default_joint_pos = self.data.qpos[7:].copy()
 
         # pd control params
+        #self.model.nu - number of actuators
         self.kp = np.full(self.model.nu, 500.0)
         self.kd = 2.0 * np.sqrt(self.kp)
 
+        #each component of action only shifts the joint target by +/- 0.5 radians atmostfrom the default position (per dimension)
         self.action_scale = 0.5
 
         # action space
-
+        #box - continuous values
         self.action_space = gym.spaces.Box(
             low = -1.0, high = 1.0,
             shape = (self.model.nu,),
@@ -86,6 +88,9 @@ class LocoMimicEnv(gym.Env):
         phase             (1,)
         ─────────────────────
         total             (139,)
+
+
+        phase - current index of the reference motion clip
         """
 
         obs_dim = 139
@@ -107,6 +112,8 @@ class LocoMimicEnv(gym.Env):
         self.renderer = None
 
         #reward 
+        # nbody - number of rigid bodies in the model
+        # range(1, self.model.nbody) - returns a list of body indices starting from 1 to nbody-1. 0 - is the world body(scene, ground, etc. which doesnt have to imitate anything)
         self.target_bodies = list(range(1, self.model.nbody))
 
         #reward weights
@@ -115,7 +122,10 @@ class LocoMimicEnv(gym.Env):
         self.w_vel = 1.0
         self.w_angv = 1.0
         self.w_action = -0.1
+        #joint angles outside limits penalty
         self.w_limit = -1.0
+        #TODO
+        #own geoms/bodies touching each other (not implemented?)
         self.w_self_contact = -0.1
 
     def reset(self, seed=None, options=None):
@@ -128,6 +138,7 @@ class LocoMimicEnv(gym.Env):
         super().reset(seed=seed)
 
         # initialize phase at random points from the motion clip
+        #TODO
         self.phase = np.random.randint(0, len(self.motion)) # will following any other dist help for long horizon? idk
 
         # set the mujoco model to ref pose from the motion clip at sampled phase 
@@ -135,10 +146,13 @@ class LocoMimicEnv(gym.Env):
         self.data.qvel[:] = self.motion.get_qvel(self.phase)
 
         # random perturbation for robustness
+        #np.random.normal(mean, std, size)
+        #TODO
         self.data.qpos[7:] += np.random.normal(0, 0.01, self.model.nu)
         self.data.qvel[6:] += np.random.normal(0, 0.01, self.model.nu)
 
         # update all body positions
+        #calculates the cartesian positions, orientation, velocities, and angular velocities of all the bodies in the model
         mujoco.mj_forward(self.model, self.data)
 
         # reset no. of steps and last action 
@@ -156,7 +170,8 @@ class LocoMimicEnv(gym.Env):
         back to the start when the clip ends.
         """
         self._apply_pd_control(action)
-           
+        
+        #
         for i in range(self.n_substeps):
             mujoco.mj_step(self.model, self.data)
         
@@ -182,6 +197,7 @@ class LocoMimicEnv(gym.Env):
         """
 
         # get robot state from mujoco
+        #qpos[0:2] - x,y position of the root ignored to make policy invariant to translation
         root_height = self.data.qpos[2:3]
         root_quat   = self.data.qpos[3:7]
         joint_pos   = self.data.qpos[7:]
@@ -250,10 +266,11 @@ class LocoMimicEnv(gym.Env):
             ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
 
         #body position tracking reward
-        
         p_b_errors = []
         for body_id in self.target_bodies:
             p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
+        #Gaussian Kernel/RBF - normalized version of mean squared error with std dev of 0.3
+        # reward is 1 when error is 0 and decreases as error increases
         r_pos = np.exp(-np.mean(p_b_errors)/0.3**2)
 
         #body orientation tracking reward
@@ -283,6 +300,7 @@ class LocoMimicEnv(gym.Env):
         r_action = np.linalg.norm(action - self.last_action)**2
         
         #joint pos limits penalty
+        #first joint is ignored as it is a free joint of the robot/root
         l_limit = self.model.jnt_range[1:, 0]
         u_limit = self.model.jnt_range[1:, 1]
         
@@ -329,6 +347,8 @@ class LocoMimicEnv(gym.Env):
         # condition 2: root orientation too far from reference
         ref_quat   = ref_qpos[3:7]
         robot_quat = self.data.qpos[3:7]
+        #dot product of quaternions gives the cosine of half the angle between the two quaternions
+        #we take absolute value because quaternions q and -q represent the same rotation
         dot = np.abs(np.dot(robot_quat, ref_quat))
         if dot < np.cos(0.8 / 2):
             return True
@@ -372,7 +392,9 @@ class LocoMimicEnv(gym.Env):
             self.viewer.cam.lookat[1] = self.data.qpos[1]  # y
             self.viewer.cam.lookat[2] = self.data.qpos[2]  # z
             self.viewer.cam.distance  = 3.0
+            #Horizontal angle of the camera
             self.viewer.cam.azimuth   = 90
+            #Vertical angle of the camera
             self.viewer.cam.elevation = -20
             
             self.viewer.sync()
