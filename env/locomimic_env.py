@@ -236,7 +236,7 @@ class LocoMimicEnv(gym.Env):
         # body orientation tracking
         o_b_errors = []
         for body_id in self.target_bodies:
-            R_curr = self.data.xmat[body_id].reshape(3, 3)
+            R_curr = self.data.xmat[body_id].reshape(3, 3)  
             R_ref = self.ref_data.xmat[body_id].reshape(3, 3)
             R_rel = R_ref @ R_curr.T
             cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)

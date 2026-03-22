@@ -22,7 +22,7 @@ class SACAgent(BaseAgent):
 
         # entropy temperature autotuning
         self.target_entropy = -act_dim / 2  # FastSAC: -|A|/2 for tracking tasks
-        self.log_alpha      = torch.tensor([np.log(0.001)], requires_grad=True, device=config.device)
+        self.log_alpha      = torch.tensor([np.log(0.001)], dtype=torch.float32, requires_grad=True, device=config.device)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=config.lr)
 
         # replay buffer
