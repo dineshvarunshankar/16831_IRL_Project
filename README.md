@@ -10,25 +10,12 @@ conda create -n roblearn python=3.10
 conda activate roblearn
 ```
 
-### 2. Install PyTorch
-Install PyTorch manually based on your platform before anything else:
-```bash
-# Linux with NVIDIA GPU (CUDA 12.x)
-pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
-
-# Mac M-series
-pip install torch==2.1.0
-
-# CPU only
-pip install torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
-```
-
-### 3. Install Dependencies
+### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. External Dependencies
+### 3. External Dependencies
 These are not committed to the repo — clone them separately:
 ```bash
 git clone https://github.com/google-deepmind/mujoco_menagerie
@@ -47,7 +34,10 @@ python visualize.py --list
 ### Training
 ```bash
 # SAC
-PYTHONPATH=. python -m train.train
+PYTHONPATH=. python train/train_sac.py
+
+# PPO
+PYTHONPATH=. python train/train_ppo.py
 
 # Random baseline
 PYTHONPATH=. python scripts/random_baseline.py
@@ -60,9 +50,12 @@ env/
   locomimic_env.py    — Gymnasium environment for motion imitation
 train/
   agents/
-    sac/              — SAC implementation from scratch
-  configs/            — YAML hyperparameter configs
-  train.py            — main training loop with wandb logging
+    sac/              — SAC implementation
+    ppo/              — PPO implementation
+    base_agent.py     — common agent interface
+  configs/            — YAML hyperparameter configs and config loader
+  train_sac.py        — SAC training loop with wandb
+  train_ppo.py        — PPO rollout-based training loop with wandb
 scripts/
   random_baseline.py  — random agent evaluation
 visualize.py          — interactive motion visualization

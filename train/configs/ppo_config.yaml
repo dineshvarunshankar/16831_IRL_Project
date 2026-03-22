@@ -1,0 +1,22 @@
+# Environment
+motion_path: "data/lafan1_retargeted/g1/walk1_subject1.csv"
+
+# Network
+hidden_dim: 512
+
+# PPO
+lr: 0.0003
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.2
+n_epochs: 5
+batch_size: 256
+rollout_steps: 4096
+ent_coef: 0.0
+vf_coef: 0.5
+max_grad_norm: 0.5
+total_steps: 10000000
+
+# Logging
+log_freq: 1000
+save_freq: 100000
