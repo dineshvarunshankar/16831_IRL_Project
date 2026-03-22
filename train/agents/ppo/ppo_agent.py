@@ -286,7 +286,7 @@ class PPOAgent(BaseAgent):
         }, path)
 
     def load(self, path):
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.actor.load_state_dict(checkpoint['actor'])
         self.critic.load_state_dict(checkpoint['critic'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
