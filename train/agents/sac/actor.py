@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-LOG_STD_MAX = 2.0
+LOG_STD_MAX = 0.0
 LOG_STD_MIN = -20.0
 
 class Actor(nn.Module):

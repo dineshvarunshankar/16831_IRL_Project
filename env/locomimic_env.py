@@ -222,93 +222,57 @@ class LocoMimicEnv(gym.Env):
 
     def _compute_reward(self, action):
 
-        # current body positions (from live sim, no mutation)
-        current_pos = {}
-        current_rot = {}
-        current_vel = {}
-        current_ang_vel = {}
-
-        for body_id in self.target_bodies:
-            current_pos[body_id] = self.data.xpos[body_id].copy()
-            current_rot[body_id] = self.data.xmat[body_id].reshape(3, 3).copy()
-            current_vel[body_id] = self.data.cvel[body_id, 3:].copy()
-            current_ang_vel[body_id] = self.data.cvel[body_id, 0:3].copy()
-
-        # reference body positions (computed on separate MjData)
+        # reference body state (computed on separate MjData)
         self.ref_data.qpos[:] = self.motion.get_qpos(self.phase)
         self.ref_data.qvel[:] = self.motion.get_qvel(self.phase)
         mujoco.mj_forward(self.model, self.ref_data)
 
-        ref_pos  = {}
-        ref_rot  = {}
-        ref_linv = {}
-        ref_angv = {}
-        for body_id in self.target_bodies:
-            ref_pos[body_id]  = self.ref_data.xpos[body_id].copy()
-            ref_rot[body_id]  = self.ref_data.xmat[body_id].reshape(3, 3).copy()
-            ref_linv[body_id] = self.ref_data.cvel[body_id, 3:].copy()
-            ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
-
-        #body position tracking reward
-        
+        # body position tracking
         p_b_errors = []
         for body_id in self.target_bodies:
-            p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
-        r_pos = np.exp(-np.mean(p_b_errors)/0.3**2)
+            p_b_errors.append(np.linalg.norm(self.data.xpos[body_id] - self.ref_data.xpos[body_id])**2)
+        r_pos = np.exp(-np.mean(p_b_errors) / 0.3**2)
 
-        #body orientation tracking reward
+        # body orientation tracking
         o_b_errors = []
         for body_id in self.target_bodies:
-            R_curr = current_rot[body_id]
-            R_ref = ref_rot[body_id]
+            R_curr = self.data.xmat[body_id].reshape(3, 3)
+            R_ref = self.ref_data.xmat[body_id].reshape(3, 3)
             R_rel = R_ref @ R_curr.T
             cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
             angle = np.arccos(cos_angle)
             o_b_errors.append(angle**2)
-        r_ori = np.exp(-np.mean(o_b_errors)/0.4**2)
+        r_ori = np.exp(-np.mean(o_b_errors) / 0.4**2)
 
-        #body linear velocity tracking reward
+        # body linear velocity tracking
         v_b_errors = []
         for body_id in self.target_bodies:
-            v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
-        r_vel = np.exp(-np.mean(v_b_errors)/1.0**2)
+            v_b_errors.append(np.linalg.norm(self.data.cvel[body_id, 3:] - self.ref_data.cvel[body_id, 3:])**2)
+        r_vel = np.exp(-np.mean(v_b_errors) / 1.0**2)
 
-        #body angular velocity tracking reward
+        # body angular velocity tracking
         av_b_errors = []
         for body_id in self.target_bodies:
-            av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
-        r_angv = np.exp(-np.mean(av_b_errors)/3.14**2)
+            av_b_errors.append(np.linalg.norm(self.data.cvel[body_id, :3] - self.ref_data.cvel[body_id, :3])**2)
+        r_angv = np.exp(-np.mean(av_b_errors) / 3.14**2)
 
-        #action penalty
-        r_action = np.linalg.norm(action - self.last_action)**2
-        
-        #joint pos limits penalty
-        l_limit = self.model.jnt_range[1:, 0]
-        u_limit = self.model.jnt_range[1:, 1]
-        
-        theta_i = self.data.qpos[7:]
+        # action rate penalty
+        r_action = -0.01 * np.sum((action - self.last_action)**2)
 
-        limit_error = []
-        for i in range(self.model.nu):
-            limit_error.append(max(0, theta_i[i] - u_limit[i]) + max(0, l_limit[i] - theta_i[i]))
-        
-        r_limit = np.sum(limit_error)
+        # alive bonus
+        r_alive = 1.0
 
-        #self contact reward is not being included for now.
-        r_self_contact = 0
+        # upright bonus — pelvis z-axis should point up
+        pelvis_z = self.data.xmat[1].reshape(3, 3)[:, 2]
+        r_upright = np.exp(-np.sum((pelvis_z - np.array([0, 0, 1]))**2) / 0.5**2)
 
-        #combine all rewards with weights
-        reward = (self.w_pos * r_pos + 
-                  self.w_ori * r_ori + 
-                  self.w_vel * r_vel + 
-                  self.w_angv * r_angv + 
-                  self.w_action * r_action + 
-                  self.w_limit * r_limit + 
-                  self.w_self_contact * r_self_contact)
-        
+        reward = (self.w_pos * r_pos +
+                  self.w_ori * r_ori +
+                  self.w_vel * r_vel +
+                  self.w_angv * r_angv +
+                  r_action + r_alive + r_upright)
+
         return reward
-            
-    
 
     def _is_terminated(self):
         """
@@ -338,13 +302,15 @@ class LocoMimicEnv(gym.Env):
 
     def _apply_pd_control(self, action):
         """
-        Converts the policy's action (normalized joint position targets) into
-        actual torques sent to the robot.
+        Converts the policy's action into joint position targets.
+        Action is a residual on top of the reference pose at the current phase.
+        action=0 means perfectly track the reference.
         """
 
-        target_pos = self.default_joint_pos + action * self.action_scale 
+        ref_joint_pos = self.motion.get_qpos(self.phase)[7:]
+        target_pos = ref_joint_pos + action * self.action_scale
 
-        self.data.ctrl[:] =  target_pos #mujoco position actuators will handle the torques
+        self.data.ctrl[:] = target_pos
 
     def close(self):
         """

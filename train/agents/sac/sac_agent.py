@@ -17,12 +17,12 @@ class SACAgent(BaseAgent):
         self.critic_target.load_state_dict(self.critic.state_dict()) #identical networks 
 
         # opt
-        self.actor_optimizer  = torch.optim.Adam(self.actor.parameters(),  lr=config.lr)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=config.lr)
+        self.actor_optimizer  = torch.optim.Adam(self.actor.parameters(),  lr=config.lr, weight_decay=0.001)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=config.lr, weight_decay=0.001)
 
         # entropy temperature autotuning
-        self.target_entropy = -act_dim  # heuristic: -dim(action)
-        self.log_alpha      = torch.zeros(1, requires_grad=True, device=config.device)
+        self.target_entropy = -act_dim / 2  # FastSAC: -|A|/2 for tracking tasks
+        self.log_alpha      = torch.tensor([np.log(0.001)], requires_grad=True, device=config.device)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=config.lr)
 
         # replay buffer
