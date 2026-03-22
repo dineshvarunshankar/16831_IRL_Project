@@ -58,20 +58,21 @@ class RunningMeanStd:
 class RolloutBuffer:
     """
     Stores one rollout of transitions for PPO.
-    Unlike replay buffer, this is emptied after each update.
+    Supports batched environments: states shape (steps_per_env, num_envs, obs_dim)
     """
-    def __init__(self, rollout_steps, obs_dim, act_dim):
-        self.rollout_steps = rollout_steps
-        self.states = np.zeros((rollout_steps, obs_dim), dtype=np.float32)
-        self.actions = np.zeros((rollout_steps, act_dim), dtype=np.float32)
-        self.rewards = np.zeros(rollout_steps, dtype=np.float32)
-        self.dones = np.zeros(rollout_steps, dtype=np.float32)
-        self.log_probs = np.zeros(rollout_steps, dtype=np.float32)
-        self.values = np.zeros(rollout_steps, dtype=np.float32)
+    def __init__(self, steps_per_env, num_envs, obs_dim, act_dim):
+        self.steps_per_env = steps_per_env
+        self.num_envs = num_envs
+        self.states = np.zeros((steps_per_env, num_envs, obs_dim), dtype=np.float32)
+        self.actions = np.zeros((steps_per_env, num_envs, act_dim), dtype=np.float32)
+        self.rewards = np.zeros((steps_per_env, num_envs), dtype=np.float32)
+        self.dones = np.zeros((steps_per_env, num_envs), dtype=np.float32)
+        self.log_probs = np.zeros((steps_per_env, num_envs), dtype=np.float32)
+        self.values = np.zeros((steps_per_env, num_envs), dtype=np.float32)
 
         # computed after rollout
-        self.advantages = np.zeros(rollout_steps, dtype=np.float32)
-        self.returns = np.zeros(rollout_steps, dtype=np.float32)
+        self.advantages = np.zeros((steps_per_env, num_envs), dtype=np.float32)
+        self.returns = np.zeros((steps_per_env, num_envs), dtype=np.float32)
 
         self.ptr = 0
 
@@ -85,30 +86,24 @@ class RolloutBuffer:
         self.ptr += 1
 
     def is_full(self):
-        return self.ptr >= self.rollout_steps
+        return self.ptr >= self.steps_per_env
 
     def reset(self):
         self.ptr = 0
 
-    def compute_gae(self, last_value, gamma, gae_lambda):
+    def compute_gae(self, last_values, gamma, gae_lambda):
         """
-        Compute Generalized Advantage Estimation.
-
-        GAE(γ, λ):
-            δ_t = r_t + γ * V(s_{t+1}) * (1 - done_t) - V(s_t)
-            Â_t = Σ_{l=0}^{T-t} (γλ)^l * δ_{t+l}
-
-        Returns = Advantages + Values
+        Compute Generalized Advantage Estimation for batched envs.
         """
-        last_gae = 0
-        for t in reversed(range(self.rollout_steps)):
-            if t == self.rollout_steps - 1:
-                next_value = last_value
+        last_gae = np.zeros(self.num_envs, dtype=np.float32)
+        for t in reversed(range(self.steps_per_env)):
+            if t == self.steps_per_env - 1:
+                next_values = last_values
             else:
-                next_value = self.values[t + 1]
+                next_values = self.values[t + 1]
 
             next_non_terminal = 1.0 - self.dones[t]
-            delta = self.rewards[t] + gamma * next_value * next_non_terminal - self.values[t]
+            delta = self.rewards[t] + gamma * next_values * next_non_terminal - self.values[t]
             last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
             self.advantages[t] = last_gae
 
@@ -116,31 +111,43 @@ class RolloutBuffer:
 
     def get_batches(self, batch_size, device):
         """
-        Yield minibatches of shuffled rollout data.
+        Yield minibatches of shuffled rollout data flattened across envs and steps.
         """
-        indices = np.arange(self.rollout_steps)
+        total_steps = self.steps_per_env * self.num_envs
+        indices = np.arange(total_steps)
         np.random.shuffle(indices)
+        
+        flat_states = self.states.reshape(total_steps, -1)
+        flat_actions = self.actions.reshape(total_steps, -1)
+        flat_log_probs = self.log_probs.reshape(total_steps)
+        flat_advantages = self.advantages.reshape(total_steps)
+        flat_returns = self.returns.reshape(total_steps)
 
-        for start in range(0, self.rollout_steps, batch_size):
+        for start in range(0, total_steps, batch_size):
             end = start + batch_size
-            batch_indices = indices[start:end]
+            b = indices[start:end]
 
             yield (
-                torch.FloatTensor(self.states[batch_indices]).to(device),
-                torch.FloatTensor(self.actions[batch_indices]).to(device),
-                torch.FloatTensor(self.log_probs[batch_indices]).to(device),
-                torch.FloatTensor(self.advantages[batch_indices]).to(device),
-                torch.FloatTensor(self.returns[batch_indices]).to(device),
+                torch.FloatTensor(flat_states[b]).to(device),
+                torch.FloatTensor(flat_actions[b]).to(device),
+                torch.FloatTensor(flat_log_probs[b]).to(device),
+                torch.FloatTensor(flat_advantages[b]).to(device),
+                torch.FloatTensor(flat_returns[b]).to(device),
             )
 
 
 class PPOAgent(BaseAgent):
     def __init__(self, obs_dim, act_dim, config):
         self.device = config.device
+        self.n_envs = getattr(config, 'n_envs', 1)
+        self.steps_per_env = config.rollout_steps // self.n_envs
 
-        # networks
-        self.actor = Actor(obs_dim, act_dim, config.hidden_dim).to(self.device)
-        self.critic = Critic(obs_dim, config.hidden_dim).to(self.device)
+        # networks (support variable hidden_dims and activation)
+        hidden_dims = getattr(config, 'hidden_dims', [512, 256, 128])
+        activation = getattr(config, 'activation', 'elu')
+        
+        self.actor = Actor(obs_dim, act_dim, hidden_dims, activation).to(self.device)
+        self.critic = Critic(obs_dim, hidden_dims, activation).to(self.device)
 
         # single optimizer for both actor and critic
         self.optimizer = torch.optim.Adam([
@@ -148,10 +155,10 @@ class PPOAgent(BaseAgent):
             {'params': self.critic.parameters(), 'lr': config.lr},
         ])
 
-        # rollout buffer
-        self.buffer = RolloutBuffer(config.rollout_steps, obs_dim, act_dim)
+        # rollout buffer (supports num_envs)
+        self.buffer = RolloutBuffer(self.steps_per_env, self.n_envs, obs_dim, act_dim)
 
-        # observation normalization
+        # observation normalization (supports batched obs)
         self.obs_normalizer = RunningMeanStd(shape=(obs_dim,))
 
         # config
@@ -165,55 +172,54 @@ class PPOAgent(BaseAgent):
 
     def select_action(self, state, deterministic=False):
         """
-        Select action from current policy.
-        Returns action, log_prob, value for PPO rollout collection.
+        Select action from current policy for a batch of environments.
+        Returns actions, log_probs, values.
         """
-        # normalize observation
+        # normalize batched observation
         state_norm = self._normalize_obs(state)
-        state_tensor = torch.FloatTensor(state_norm).unsqueeze(0).to(self.device)
+        state_tensor = torch.FloatTensor(state_norm).to(self.device)
 
         with torch.no_grad():
             if deterministic:
                 mean, _ = self.actor(state_tensor)
                 action = torch.tanh(mean)
-                log_prob = torch.zeros(1)
+                log_prob = torch.zeros(self.n_envs)
             else:
                 action, log_prob = self.actor.sample(state_tensor)
 
             value = self.critic(state_tensor)
 
-        action = action.cpu().numpy().flatten()
-        log_prob = log_prob.cpu().item()
-        value = value.cpu().item()
+        action = action.cpu().numpy()
+        log_prob = log_prob.cpu().numpy().flatten()
+        value = value.cpu().numpy().flatten()
 
         return action, log_prob, value
 
     def collect(self, state, action, reward, done, log_prob, value):
         """Add transition to rollout buffer and update observation normalizer"""
-        # update normalizer with raw observation
-        self.obs_normalizer.update(state.reshape(1, -1))
+        # update normalizer with raw batched observations
+        self.obs_normalizer.update(state)
 
         # store normalized observation in buffer
         state_norm = self._normalize_obs(state)
         self.buffer.add(state_norm, action, reward, done, log_prob, value)
 
-    def update(self):
+    def update(self, next_obs):
         """
         Run PPO update on collected rollout data.
-        Called once after buffer is full (rollout_steps transitions collected).
+        next_obs is the batched observation after the last step of the rollout.
         """
         if not self.buffer.is_full():
             return {}
 
-        # get last value for GAE bootstrap
-        # use the last state in the buffer to estimate V(s_T)
-        last_state = self.buffer.states[self.buffer.ptr - 1]
-        last_state_tensor = torch.FloatTensor(last_state).unsqueeze(0).to(self.device)
+        # get value of the state *after* the rollout for GAE bootstrap
+        next_state_norm = self._normalize_obs(next_obs)
+        next_state_tensor = torch.FloatTensor(next_state_norm).to(self.device)
         with torch.no_grad():
-            last_value = self.critic(last_state_tensor).cpu().item()
+            last_values = self.critic(next_state_tensor).cpu().numpy().flatten()
 
         # compute GAE advantages and returns
-        self.buffer.compute_gae(last_value, self.config.gamma, self.config.gae_lambda)
+        self.buffer.compute_gae(last_values, self.config.gamma, self.config.gae_lambda)
 
         # track losses for logging
         total_policy_loss = 0
@@ -243,7 +249,7 @@ class PPOAgent(BaseAgent):
                 # value loss (MSE)
                 value_loss = F.mse_loss(values, returns)
 
-                # entropy bonus (for exploration — set to 0 for imitation)
+                # entropy bonus (for exploration)
                 dist = self.actor.get_distribution(states)
                 entropy = dist.entropy().sum(dim=-1).mean()
 

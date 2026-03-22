@@ -28,7 +28,8 @@ def load_config(path):
 @dataclass
 class PPOConfig:
     motion_path   : str
-    hidden_dim    : int
+    hidden_dims   : list
+    activation    : str
     lr            : float
     gamma         : float
     gae_lambda    : float
@@ -40,6 +41,7 @@ class PPOConfig:
     vf_coef       : float
     max_grad_norm : float
     total_steps   : int
+    n_envs        : int
     log_freq      : int
     save_freq     : int
     device        : str = 'cpu'

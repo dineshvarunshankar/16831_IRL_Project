@@ -116,26 +116,19 @@ class LocoMimicEnv(gym.Env):
         # range(1, self.model.nbody) - returns a list of body indices starting from 1 to nbody-1. 0 - is the world body(scene, ground, etc. which doesnt have to imitate anything)
         self.target_bodies = list(range(1, self.model.nbody))
 
-        # Reward weights — tracking terms sum to ~0.85, alive bonus adds +0.15 on top
-        self.w_pos = 0.4       # body position tracking
-        self.w_ori = 0.15      # body orientation tracking  
-        self.w_vel = 0.1       # linear velocity tracking
-        self.w_angv = 0.1      # angular velocity tracking
-        self.w_height = 0.1    # root height tracking (smooth signal before termination)
-        self.w_alive = 0.15    # alive bonus per step (incentivize survival)
+        # Reward weights — matching BeyondMimic (equal weights, no normalization)
+        self.w_pos  = 1.0      # body position tracking
+        self.w_ori  = 1.0      # body orientation tracking  
+        self.w_vel  = 1.0      # linear velocity tracking
+        self.w_angv = 1.0      # angular velocity tracking
 
-        # penalty weights (kept small so tracking signal dominates)
-        self.w_action = -0.01     # action smoothness penalty
-        self.w_limit = -0.1       # joint limit violation penalty
-        self.w_self_contact = 0.0 # not implemented yet
+        # penalty weights (matching BeyondMimic)
+        self.w_action = -0.1       # action smoothness penalty
+        self.w_limit  = -10.0      # joint limit violation penalty
 
-        # curriculum termination thresholds — start lenient, tighten over training
-        self.init_height_threshold = 0.5  # initial: allow 50cm deviation from ref
-        self.init_ori_threshold = 1.2     # initial: ~69 degrees from ref orientation
-        self.min_height_threshold = 0.35  # tighten to 35cm (allows natural bounce)
-        self.min_ori_threshold = 0.9      # tighten to ~52 degrees (allows lean)
-        self.height_threshold = self.init_height_threshold
-        self.ori_threshold = self.init_ori_threshold
+        # fixed termination thresholds (matching BeyondMimic — no curriculum)
+        self.height_threshold = 0.25  # 25cm deviation from reference height
+        self.ori_threshold = 0.8      # ~46 degrees from reference orientation
 
     def reset(self, seed=None, options=None):
         """
@@ -280,15 +273,13 @@ class LocoMimicEnv(gym.Env):
             ref_linv[body_id] = self.ref_data.cvel[body_id, 3:].copy()
             ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
 
-        # body position tracking reward
+        # body position tracking reward (BeyondMimic: std=0.3, kernel=1/0.09≈11.1)
         p_b_errors = []
         for body_id in self.target_bodies:
             p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
-        
-        # Softer Gaussian kernels — more gradient signal for learning
-        r_pos = np.exp(-5.0 * np.mean(p_b_errors))
+        r_pos = np.exp(-11.1 * np.mean(p_b_errors))
 
-        # body orientation tracking reward
+        # body orientation tracking reward (BeyondMimic: std=0.4, kernel=1/0.16≈6.25)
         o_b_errors = []
         for body_id in self.target_bodies:
             R_curr = current_rot[body_id]
@@ -297,36 +288,27 @@ class LocoMimicEnv(gym.Env):
             cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
             angle = np.arccos(cos_angle)
             o_b_errors.append(angle**2)
-        r_ori = np.exp(-3.0 * np.mean(o_b_errors))
+        r_ori = np.exp(-6.25 * np.mean(o_b_errors))
 
-        # body linear velocity tracking reward
+        # body linear velocity tracking reward (BeyondMimic: std=1.0, kernel=1.0)
         v_b_errors = []
         for body_id in self.target_bodies:
             v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
         r_vel = np.exp(-1.0 * np.mean(v_b_errors))
 
-        # body angular velocity tracking reward
+        # body angular velocity tracking reward (BeyondMimic: std=3.14, kernel=1/9.87≈0.1)
         av_b_errors = []
         for body_id in self.target_bodies:
             av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
-        r_angv = np.exp(-1.0 * np.mean(av_b_errors))
+        r_angv = np.exp(-0.1 * np.mean(av_b_errors))
 
-        # root height tracking reward (smooth signal before hard termination)
-        ref_qpos = self.motion.get_qpos(self.phase)
-        height_err = (self.data.qpos[2] - ref_qpos[2]) ** 2
-        r_height = np.exp(-5.0 * height_err)
-
-        # alive bonus (constant reward for surviving each step)
-        r_alive = 1.0
-
-        # tracking reward: weighted sum
+        # tracking reward: weighted sum (BeyondMimic uses equal weights of 1.0)
         r_tracking = (self.w_pos * r_pos + 
                       self.w_ori * r_ori + 
                       self.w_vel * r_vel + 
-                      self.w_angv * r_angv +
-                      self.w_height * r_height)
+                      self.w_angv * r_angv)
 
-        # action smoothness penalty
+        # action smoothness penalty (L2 of action rate)
         r_action = np.linalg.norm(action - self.last_action)**2
         
         # joint pos limits penalty
@@ -341,8 +323,8 @@ class LocoMimicEnv(gym.Env):
 
         r_penalties = self.w_action * r_action + self.w_limit * r_limit 
 
-        # combine: tracking + alive bonus + penalties
-        reward = r_tracking + self.w_alive * r_alive + r_penalties
+        # combine: tracking + penalties
+        reward = r_tracking + r_penalties
         
         return reward
             
@@ -350,52 +332,26 @@ class LocoMimicEnv(gym.Env):
 
     def _is_terminated(self):
         """
-        Checks if the episode should end early. Terminates if the robot's
-        height or orientation deviates too far from the reference, meaning
-        the robot has effectively fallen or lost balance beyond recovery.
-        Early termination gives the policy a strong signal that these states
-        are bad, which speeds up learning.
-        
-        Uses curriculum thresholds that start lenient and tighten over
-        training via update_curriculum().
+        Checks if the episode should end early (matching BeyondMimic).
+        Uses fixed thresholds — no dynamic curriculum.
+        Terminates if root height or orientation deviates too far from reference.
         """
 
         ref_qpos = self.motion.get_qpos(self.phase)
 
-        # condition 1: height deviation from reference (curriculum threshold)
+        # condition 1: height deviation from reference (BeyondMimic: 0.25m)
         height_err = abs(self.data.qpos[2] - ref_qpos[2])
         if height_err > self.height_threshold:
             return True
 
-        # condition 2: root orientation too far from reference
+        # condition 2: root orientation too far from reference (BeyondMimic: 0.8 rad)
         ref_quat   = ref_qpos[3:7]
         robot_quat = self.data.qpos[3:7]
-        #dot product of quaternions gives the cosine of half the angle between the two quaternions
-        #we take absolute value because quaternions q and -q represent the same rotation
         dot = np.abs(np.dot(robot_quat, ref_quat))
         if dot < np.cos(self.ori_threshold / 2):
             return True
 
         return False
-
-    def update_curriculum(self, progress):
-        """
-        Update termination thresholds based on training progress.
-        
-        Args:
-            progress: float in [0, 1], where 0 = start of training, 1 = end.
-                      Computed as current_step / total_steps in train.py.
-        
-        Linearly interpolates from initial (lenient) to minimum (strict) thresholds.
-        Early in training, robot gets more room to deviate and learn.
-        Later, it must track the reference more precisely.
-        """
-        # Don't tighten during warm-up phase (first 20% of training)
-        effective_progress = max(0, (progress - 0.2) / 0.8)
-        self.height_threshold = self.init_height_threshold + effective_progress * (
-            self.min_height_threshold - self.init_height_threshold)
-        self.ori_threshold = self.init_ori_threshold + effective_progress * (
-            self.min_ori_threshold - self.init_ori_threshold)
   
 
     def _apply_pd_control(self, action):

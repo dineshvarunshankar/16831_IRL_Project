@@ -17,15 +17,19 @@ def orthogonal_init(module, gain=np.sqrt(2)):
 
 
 class Actor(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dim=512):
+    def __init__(self, obs_dim, act_dim, hidden_dims=[512, 256, 128], activation="elu"):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-        )
-        self.mean_head = nn.Linear(hidden_dim, act_dim)
+        act_layer = nn.ELU if activation.lower() == 'elu' else nn.ReLU
+        
+        layers = []
+        d = obs_dim
+        for h in hidden_dims:
+            layers.append(nn.Linear(d, h))
+            layers.append(act_layer())
+            d = h
+            
+        self.net = nn.Sequential(*layers)
+        self.mean_head = nn.Linear(hidden_dims[-1], act_dim)
 
         # learnable log_std (state-independent)
         self.log_std = nn.Parameter(torch.zeros(act_dim))
@@ -55,7 +59,6 @@ class Actor(nn.Module):
         dist = self.get_distribution(state)
 
         # inverse tanh to get pre-squash action
-        # atanh(a) = 0.5 * ln((1+a)/(1-a))
         action_clipped = action.clamp(-0.999, 0.999)
         u = torch.atanh(action_clipped)
 
@@ -77,15 +80,19 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, obs_dim, hidden_dim=512):
+    def __init__(self, obs_dim, hidden_dims=[512, 256, 128], activation="elu"):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, 1),
-        )
+        act_layer = nn.ELU if activation.lower() == 'elu' else nn.ReLU
+        
+        layers = []
+        d = obs_dim
+        for h in hidden_dims:
+            layers.append(nn.Linear(d, h))
+            layers.append(act_layer())
+            d = h
+            
+        layers.append(nn.Linear(hidden_dims[-1], 1))
+        self.net = nn.Sequential(*layers)
 
         # orthogonal init (output layer with gain=1.0)
         self.net.apply(orthogonal_init)
