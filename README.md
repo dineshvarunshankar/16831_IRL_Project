@@ -10,7 +10,24 @@ conda create -n roblearn python=3.10
 conda activate roblearn
 ```
 
-### 2. Install Dependencies
+### 2. Install PyTorch
+Install PyTorch manually based on your platform before anything else:
+```bash
+# Linux with NVIDIA GPU (CUDA 12.x)
+pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+
+# Linux with NVIDIA GPU (CUDA 13.x)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+
+
+# Mac M-series
+pip install torch==2.1.0
+
+# CPU only
+pip install torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+```
+
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
@@ -21,6 +38,11 @@ These are not committed to the repo — clone them separately:
 git clone https://github.com/google-deepmind/mujoco_menagerie
 git clone https://github.com/unitreerobotics/unitree_mujoco
 ```
+
+### 4. Motion Data (LAFAN1)
+Because motion data files are large, the `data/` folder is ignored by git. Download the retargeted LAFAN1 kinematic data and place it in the correct directory before visualizing or training:
+1. Download the `lafan1_retargeted` dataset from the [HuggingFace](https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset).
+2. Extract it into the root of this project so the path looks like: `data/lafan1_retargeted/g1/walk1_subject1.csv`
 
 ## Usage
 
