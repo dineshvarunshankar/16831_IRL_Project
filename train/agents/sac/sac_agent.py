@@ -67,8 +67,10 @@ class SACAgent(BaseAgent):
 
             self._update_critic(s, a, r, s_next, done)
             self._update_actor(s)
-            self._update_alpha(s)
-            self._soft_update_targets()
+        
+        # try doing this once per update instead of every gradient step
+        self._update_alpha(s)
+        self._soft_update_targets()
 
 
     
