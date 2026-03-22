@@ -148,8 +148,9 @@ class PPOAgent(BaseAgent):
             {'params': self.critic.parameters(), 'lr': config.lr},
         ])
 
-        # rollout buffer
-        self.buffer = RolloutBuffer(config.rollout_steps, obs_dim, act_dim)
+        # rollout buffer (sized for n_envs * rollout_steps)
+        n_envs = getattr(config, 'n_envs', 1)
+        self.buffer = RolloutBuffer(config.rollout_steps * n_envs, obs_dim, act_dim)
 
         # observation normalization
         self.obs_normalizer = RunningMeanStd(shape=(obs_dim,))

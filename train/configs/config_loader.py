@@ -18,9 +18,37 @@ class SACConfig:
     save_freq         : int
     device            : str = 'cpu'
 
-def load_config(path):
+@dataclass
+class PPOConfig:
+    motion_path       : str
+    hidden_dim        : int
+    lr                : float
+    gamma             : float
+    gae_lambda        : float
+    clip_range        : float
+    n_epochs          : int
+    batch_size        : int
+    rollout_steps     : int
+    ent_coef          : float
+    vf_coef           : float
+    max_grad_norm     : float
+    total_steps       : int
+    log_freq          : int
+    save_freq         : int
+    n_envs            : int = 1
+    device            : str = 'cpu'
+
+def _auto_device(cfg):
     import torch
+    cfg['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
+    return cfg
+
+def load_config(path):
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    cfg['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
-    return SACConfig(**cfg)
+    return SACConfig(**_auto_device(cfg))
+
+def load_ppo_config(path):
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    return PPOConfig(**_auto_device(cfg))

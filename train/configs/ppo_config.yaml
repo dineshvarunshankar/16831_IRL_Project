@@ -1,10 +1,10 @@
-# Environment
+# environment
 motion_path: "data/lafan1_retargeted/g1/walk1_subject1.csv"
 
-# Network
+# network
 hidden_dim: 512
 
-# PPO
+# ppo
 lr: 0.0003
 gamma: 0.99
 gae_lambda: 0.95
@@ -15,8 +15,9 @@ rollout_steps: 4096
 ent_coef: 0.005
 vf_coef: 0.5
 max_grad_norm: 0.5
-total_steps: 20000000
+total_steps: 3000000
+n_envs: 4
 
-# Logging
+# logging
 log_freq: 1000
 save_freq: 100000

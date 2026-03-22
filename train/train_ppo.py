@@ -1,110 +1,143 @@
-"""
-PPO Training Script for Motion Imitation
-
-On-policy training loop:
-    1. Collect rollout_steps transitions
-    2. PPO agent computes GAE and updates policy
-    3. Log metrics to wandb
-    4. Update curriculum termination thresholds
-    5. Repeat until total_steps reached
-"""
-
+import argparse
 import numpy as np
 import torch
 import wandb
 import os
+from datetime import datetime
 from env.locomimic_env import LocoMimicEnv
 from train.agents.ppo.ppo_agent import PPOAgent
 from train.configs.config_loader import load_ppo_config
 
 
-def train(config_path='train/configs/ppo_config.yaml'):
-    config = load_ppo_config(config_path)
+def train():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--name', type=str, default=None, help='Experiment name')
+    parser.add_argument('--config', type=str, default='train/configs/ppo_config.yaml')
+    parser.add_argument('--load', type=str, default=None, help='Path to checkpoint to resume from')
+    args = parser.parse_args()
 
-    # init wandb
+    config = load_ppo_config(args.config)
+
+    # experiment name and per-run directories
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_name = args.name or f'ppo_{timestamp}'
+    run_model_dir = f'models/{run_name}'
+    run_log_dir = f'logs/{run_name}'
+    os.makedirs(run_model_dir, exist_ok=True)
+    os.makedirs(run_log_dir, exist_ok=True)
+
     wandb.init(
         project='locomimic',
-        name='ppo_walk1',
+        name=run_name,
         config=config.__dict__
     )
 
-    # create env and agent
-    env = LocoMimicEnv(config.motion_path)
+    # parallel environments
+    envs = [LocoMimicEnv(config.motion_path) for _ in range(config.n_envs)]
     agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
 
-    # create directories
-    os.makedirs('models/ppo', exist_ok=True)
-    os.makedirs('logs', exist_ok=True)
+    if args.load:
+        agent.load(args.load)
+        print(f'Loaded checkpoint: {args.load}')
 
-    print(f'Device: {config.device}')
-    print(f'Training for {config.total_steps} steps')
-    print(f'Rollout steps: {config.rollout_steps}')
-    print(f'Batch size: {config.batch_size}')
-    print(f'N epochs: {config.n_epochs}')
+    print(f'Run      : {run_name}')
+    print(f'Device   : {config.device}')
+    print(f'Steps    : {config.total_steps}')
+    print(f'N envs   : {config.n_envs}')
+    print(f'Rollout  : {config.rollout_steps}')
 
-    obs, _ = env.reset()
-    episode_return = 0.0
-    episode_steps = 0
+    # per-env state
+    obs_list = []
+    for env in envs:
+        o, _ = env.reset()
+        obs_list.append(o)
+
+    ep_returns = [0.0] * config.n_envs
+    ep_steps = [0] * config.n_envs
     episode_num = 0
     global_step = 0
 
+    # checkpoint at 25%, 50%, 75%, and final
+    ckpt_steps = {
+        int(config.total_steps * 0.25),
+        int(config.total_steps * 0.50),
+        int(config.total_steps * 0.75),
+    }
+
+    recent_returns = []
+    recent_lengths = []
+
     while global_step < config.total_steps:
 
-        # Collect rollout
+        # collect rollout across all envs
         for rollout_step in range(config.rollout_steps):
-            action, log_prob, value = agent.select_action(obs)
+            for i, env in enumerate(envs):
+                action, log_prob, value = agent.select_action(obs_list[i])
 
-            obs_next, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
+                obs_next, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
 
-            agent.collect(obs, action, reward, done, log_prob, value)
+                agent.collect(obs_list[i], action, reward, done, log_prob, value)
 
-            obs = obs_next
-            episode_return += reward
-            episode_steps += 1
+                obs_list[i] = obs_next
+                ep_returns[i] += reward
+                ep_steps[i] += 1
+
+                if done:
+                    recent_returns.append(ep_returns[i])
+                    recent_lengths.append(ep_steps[i])
+
+                    log_data = {
+                        'episode/return': ep_returns[i],
+                        'episode/steps': ep_steps[i],
+                        'episode/num': episode_num,
+                        'episode/terminated': int(terminated),
+                        'env_step': global_step,
+                    }
+
+                    if len(recent_returns) >= 100:
+                        log_data['episode/avg_return_100'] = np.mean(recent_returns[-100:])
+                        log_data['episode/avg_steps_100'] = np.mean(recent_lengths[-100:])
+
+                    wandb.log(log_data, step=global_step)
+
+                    if episode_num % 500 == 0:
+                        avg_r = np.mean(recent_returns[-100:]) if len(recent_returns) >= 100 else np.mean(recent_returns)
+                        avg_l = np.mean(recent_lengths[-100:]) if len(recent_lengths) >= 100 else np.mean(recent_lengths)
+                        print(f'Step {global_step:8d} | Ep {episode_num:5d} | '
+                              f'Return {ep_returns[i]:8.2f} | Steps {ep_steps[i]:4d} | '
+                              f'Avg100 R={avg_r:7.2f} L={avg_l:5.1f}')
+
+                    obs_list[i], _ = env.reset()
+                    ep_returns[i] = 0.0
+                    ep_steps[i] = 0
+                    episode_num += 1
+
             global_step += 1
 
-            if done:
-                wandb.log({
-                    'episode_return': episode_return,
-                    'episode_steps': episode_steps,
-                    'episode': episode_num,
-                    'step': global_step,
-                })
-
-                if episode_num % 100 == 0:
-                    print(f'Step {global_step:8d} | Episode {episode_num:5d} | '
-                          f'Return {episode_return:8.4f} | Steps {episode_steps:4d}')
-
-                obs, _ = env.reset()
-                episode_return = 0.0
-                episode_steps = 0
-                episode_num += 1
-
-        # PPO Update
+        # PPO update
         losses = agent.update()
 
         if losses:
             wandb.log({
-                'policy_loss': losses['policy_loss'],
-                'value_loss': losses['value_loss'],
-                'entropy': losses['entropy'],
-                'step': global_step,
-            })
+                'agent/policy_loss': losses['policy_loss'],
+                'agent/value_loss': losses['value_loss'],
+                'agent/entropy': losses['entropy'],
+            }, step=global_step)
 
-        # Checkpoints
-        if global_step % config.save_freq < config.rollout_steps:
-            agent.save(f'models/ppo/ppo_step_{global_step}.pt')
-            print(f'Saved checkpoint at step {global_step}')
+        # checkpoints
+        if any(global_step >= s and global_step - config.rollout_steps < s for s in ckpt_steps):
+            path = f'{run_model_dir}/ckpt_step_{global_step}.pt'
+            agent.save(path)
+            print(f'Checkpoint saved: {path}')
 
-        # Curriculum Update
-        if global_step % 100000 < config.rollout_steps:
-            progress = global_step / config.total_steps
-            env.update_curriculum(progress)
-            print(f'Curriculum updated: height_thresh={env.height_threshold:.3f}, '
-                  f'ori_thresh={env.ori_threshold:.3f}')
+    # final save
+    final_path = f'{run_model_dir}/final.pt'
+    agent.save(final_path)
+    print(f'Final model saved: {final_path}')
 
-    agent.save('models/ppo/ppo_final.pt')
+    for env in envs:
+        env.close()
     wandb.finish()
     print('Training complete.')
 
