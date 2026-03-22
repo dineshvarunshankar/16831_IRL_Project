@@ -53,28 +53,15 @@ class Actor(nn.Module):
     def log_prob(self, state, action):
         """
         Compute log probability of action under current policy.
-        Accounts for tanh squashing: log π(a|s) = log N(u|μ,σ) - Σ log(1 - tanh²(u))
-        where a = tanh(u).
         """
         dist = self.get_distribution(state)
-
-        # inverse tanh to get pre-squash action
-        action_clipped = action.clamp(-0.999, 0.999)
-        u = torch.atanh(action_clipped)
-
-        log_prob = dist.log_prob(u)
-        # correction for tanh squashing
-        log_prob -= torch.log(1 - action.pow(2) + 1e-6)
-        return log_prob.sum(dim=-1, keepdim=True)
+        return dist.log_prob(action).sum(dim=-1, keepdim=True)
 
     def sample(self, state):
-        """Sample action with tanh squashing, return action and log_prob"""
+        """Sample action from Gaussian distribution, return action and log_prob"""
         dist = self.get_distribution(state)
-        u = dist.rsample()
-        action = torch.tanh(u)
-
-        log_prob = dist.log_prob(u) - torch.log(1 - action.pow(2) + 1e-6)
-        log_prob = log_prob.sum(dim=-1, keepdim=True)
+        action = dist.sample()
+        log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
 
         return action, log_prob
 

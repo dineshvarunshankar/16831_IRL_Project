@@ -198,6 +198,10 @@ class LocoMimicEnv(gym.Env):
         compute the error and correct itself.
         """
 
+        # Handle physics NaN explosions by returning a zeroed terminal state
+        if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
+            return np.zeros(self.observation_space.shape[0], dtype=np.float32)
+
         # get robot state from mujoco
         #qpos[0:2] - x,y position of the root ignored to make policy invariant to translation
         root_height = self.data.qpos[2:3]
@@ -245,6 +249,10 @@ class LocoMimicEnv(gym.Env):
         Each sub-reward is in [0, 1], weights sum to 1.0, so total tracking
         reward is in [0, 1]. Small penalties are added on top.
         """
+
+        # Immediately penalize and halt reward computation on physics explosions
+        if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
+            return -100.0
 
         # current body positions (from live sim, no mutation)
         current_pos = {}
@@ -342,6 +350,10 @@ class LocoMimicEnv(gym.Env):
         Uses fixed thresholds and no dynamic curriculum.
         Terminates if root height or orientation deviates too far from reference.
         """
+
+        # condition 0: Physics explosion (NaN)
+        if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
+            return True
 
         ref_qpos = self.motion.get_qpos(self.phase)
 
