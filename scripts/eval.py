@@ -37,6 +37,9 @@ for ep in range(args.episodes):
 
     while not done:
         action = agent.select_action(obs, deterministic=args.deterministic)
+        if args.algo == 'ppo':
+            action = action[0]  # PPO returns (action, log_prob, value)
+            
         obs, reward, terminated, truncated, _ = env.step(action)
 
         if args.render:
