@@ -116,22 +116,24 @@ class LocoMimicEnv(gym.Env):
         # range(1, self.model.nbody) - returns a list of body indices starting from 1 to nbody-1. 0 - is the world body(scene, ground, etc. which doesnt have to imitate anything)
         self.target_bodies = list(range(1, self.model.nbody))
 
-        # Reward weights (sum to 1.0 for tracking terms) - Inspired by DeepMimic
-        self.w_pos = 0.5      # body position tracking
-        self.w_ori = 0.2      # body orientation tracking  
-        self.w_vel = 0.1      # linear velocity tracking
-        self.w_angv = 0.2     # angular velocity tracking
+        # Reward weights — tracking terms sum to ~0.85, alive bonus adds +0.15 on top
+        self.w_pos = 0.4       # body position tracking
+        self.w_ori = 0.15      # body orientation tracking  
+        self.w_vel = 0.1       # linear velocity tracking
+        self.w_angv = 0.1      # angular velocity tracking
+        self.w_height = 0.1    # root height tracking (smooth signal before termination)
+        self.w_alive = 0.15    # alive bonus per step (incentivize survival)
 
         # penalty weights (kept small so tracking signal dominates)
-        self.w_action = -0.01     # action smoothness penalty (was -0.1)
-        self.w_limit = -0.1       # joint limit violation penalty (was -1.0)
+        self.w_action = -0.01     # action smoothness penalty
+        self.w_limit = -0.1       # joint limit violation penalty
         self.w_self_contact = 0.0 # not implemented yet
 
         # curriculum termination thresholds — start lenient, tighten over training
         self.init_height_threshold = 0.5  # initial: allow 50cm deviation from ref
         self.init_ori_threshold = 1.2     # initial: ~69 degrees from ref orientation
-        self.min_height_threshold = 0.2   # tighten to 20cm 
-        self.min_ori_threshold = 0.6      # tighten to ~34 degrees
+        self.min_height_threshold = 0.35  # tighten to 35cm (allows natural bounce)
+        self.min_ori_threshold = 0.9      # tighten to ~52 degrees (allows lean)
         self.height_threshold = self.init_height_threshold
         self.ori_threshold = self.init_ori_threshold
 
@@ -283,8 +285,8 @@ class LocoMimicEnv(gym.Env):
         for body_id in self.target_bodies:
             p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
         
-        #Gaussian Kernel/RBF - normalized version of mean squared error
-        r_pos = np.exp(-10.0 * np.mean(p_b_errors))  # was /0.3² ≈ /0.09 ≈ *11 — now explicit *10
+        # Softer Gaussian kernels — more gradient signal for learning
+        r_pos = np.exp(-5.0 * np.mean(p_b_errors))
 
         # body orientation tracking reward
         o_b_errors = []
@@ -295,31 +297,39 @@ class LocoMimicEnv(gym.Env):
             cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
             angle = np.arccos(cos_angle)
             o_b_errors.append(angle**2)
-        r_ori = np.exp(-5.0 * np.mean(o_b_errors))  # was /0.4² ≈ *6.25 — now *5
+        r_ori = np.exp(-3.0 * np.mean(o_b_errors))
 
         # body linear velocity tracking reward
         v_b_errors = []
         for body_id in self.target_bodies:
             v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
-        r_vel = np.exp(-2.0 * np.mean(v_b_errors))  # was /1.0² ≈ *1 — now *2
+        r_vel = np.exp(-1.0 * np.mean(v_b_errors))
 
         # body angular velocity tracking reward
         av_b_errors = []
         for body_id in self.target_bodies:
             av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
-        r_angv = np.exp(-1.0 * np.mean(av_b_errors))  # was /3.14² ≈ *0.1 — now *1
+        r_angv = np.exp(-1.0 * np.mean(av_b_errors))
 
-        # tracking reward: weighted sum, bounded in [0, 1]
+        # root height tracking reward (smooth signal before hard termination)
+        ref_qpos = self.motion.get_qpos(self.phase)
+        height_err = (self.data.qpos[2] - ref_qpos[2]) ** 2
+        r_height = np.exp(-5.0 * height_err)
+
+        # alive bonus (constant reward for surviving each step)
+        r_alive = 1.0
+
+        # tracking reward: weighted sum
         r_tracking = (self.w_pos * r_pos + 
                       self.w_ori * r_ori + 
                       self.w_vel * r_vel + 
-                      self.w_angv * r_angv)
+                      self.w_angv * r_angv +
+                      self.w_height * r_height)
 
         # action smoothness penalty
         r_action = np.linalg.norm(action - self.last_action)**2
         
-        #joint pos limits penalty
-        #first joint is ignored as it is a free joint of the robot/root
+        # joint pos limits penalty
         l_limit = self.model.jnt_range[1:, 0]
         u_limit = self.model.jnt_range[1:, 1]
         theta_i = self.data.qpos[7:]
@@ -331,8 +341,8 @@ class LocoMimicEnv(gym.Env):
 
         r_penalties = self.w_action * r_action + self.w_limit * r_limit 
 
-        # combine: tracking (dominant) + small penalties
-        reward = r_tracking + r_penalties
+        # combine: tracking + alive bonus + penalties
+        reward = r_tracking + self.w_alive * r_alive + r_penalties
         
         return reward
             
@@ -380,9 +390,11 @@ class LocoMimicEnv(gym.Env):
         Early in training, robot gets more room to deviate and learn.
         Later, it must track the reference more precisely.
         """
-        self.height_threshold = self.init_height_threshold + progress * (
+        # Don't tighten during warm-up phase (first 20% of training)
+        effective_progress = max(0, (progress - 0.2) / 0.8)
+        self.height_threshold = self.init_height_threshold + effective_progress * (
             self.min_height_threshold - self.init_height_threshold)
-        self.ori_threshold = self.init_ori_threshold + progress * (
+        self.ori_threshold = self.init_ori_threshold + effective_progress * (
             self.min_ori_threshold - self.init_ori_threshold)
   
 
