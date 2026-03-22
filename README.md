@@ -33,10 +33,9 @@ pip install -r requirements.txt
 ```
 
 ### 3. External Dependencies
-These are not committed to the repo — clone them separately:
+This project uses external repositories as submodules. To initialize and download them, run:
 ```bash
-git clone https://github.com/google-deepmind/mujoco_menagerie
-git clone https://github.com/unitreerobotics/unitree_mujoco
+git submodule update --init --recursive
 ```
 
 ### 4. Motion Data (LAFAN1)
