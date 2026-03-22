@@ -12,6 +12,7 @@ def train():
     parser = argparse.ArgumentParser()
     parser.add_argument('--name', type=str, default=None, help='Experiment name')
     parser.add_argument('--config', type=str, default='train/configs/sac_config.yaml')
+    parser.add_argument('--load', type=str, default=None, help='Path to checkpoint to resume from')
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -32,6 +33,10 @@ def train():
 
     env = LocoMimicEnv(config.motion_path)
     agent = SACAgent(obs_dim=139, act_dim=29, config=config)
+
+    if args.load:
+        agent.load(args.load)
+        print(f'Loaded checkpoint: {args.load}')
 
     print(f'Run    : {run_name}')
     print(f'Device : {config.device}')

@@ -2,19 +2,28 @@ import argparse
 import numpy as np
 from env.locomimic_env import LocoMimicEnv
 from train.agents.sac.sac_agent import SACAgent
-from train.configs.config_loader import load_config
+from train.agents.ppo.ppo_agent import PPOAgent
+from train.configs.config_loader import load_config, load_ppo_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument('checkpoint', type=str, help='Path to trained policy checkpoint (.pt)')
-parser.add_argument('--config', type=str, default='train/configs/sac_config.yaml')
+parser.add_argument('--algo', type=str, choices=['sac', 'ppo'], default='ppo')
+parser.add_argument('--config', type=str, default=None, help='Override default config path')
 parser.add_argument('--episodes', type=int, default=100)
 parser.add_argument('--render', action='store_true')
 parser.add_argument('--deterministic', action='store_true', help='Use mean action (no sampling)')
 args = parser.parse_args()
 
-config = load_config(args.config)
+if args.algo == 'ppo':
+    config_path = args.config if args.config else 'train/configs/ppo_config.yaml'
+    config = load_ppo_config(config_path)
+    agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
+else:
+    config_path = args.config if args.config else 'train/configs/sac_config.yaml'
+    config = load_config(config_path)
+    agent = SACAgent(obs_dim=139, act_dim=29, config=config)
+
 env = LocoMimicEnv(config.motion_path, render_mode='human' if args.render else None)
-agent = SACAgent(obs_dim=139, act_dim=29, config=config)
 agent.load(args.checkpoint)
 
 episode_returns = []
@@ -28,6 +37,9 @@ for ep in range(args.episodes):
 
     while not done:
         action = agent.select_action(obs, deterministic=args.deterministic)
+        if args.algo == 'ppo':
+            action = action[0]  # PPO returns (action, log_prob, value)
+            
         obs, reward, terminated, truncated, _ = env.step(action)
 
         if args.render:

@@ -32,8 +32,6 @@ class SACAgent(BaseAgent):
         self.device = config.device
         self.obs_dim = obs_dim
         self.act_dim = act_dim
-
-
     
     def select_action(self, state, deterministic=False):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
