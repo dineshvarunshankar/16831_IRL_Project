@@ -116,17 +116,17 @@ class LocoMimicEnv(gym.Env):
         # range(1, self.model.nbody) - returns a list of body indices starting from 1 to nbody-1. 0 - is the world body(scene, ground, etc. which doesnt have to imitate anything)
         self.target_bodies = list(range(1, self.model.nbody))
 
-        # Reward weights — matching BeyondMimic (equal weights, no normalization)
+        # Reward weights
         self.w_pos  = 1.0      # body position tracking
         self.w_ori  = 1.0      # body orientation tracking  
         self.w_vel  = 1.0      # linear velocity tracking
         self.w_angv = 1.0      # angular velocity tracking
 
-        # penalty weights (matching BeyondMimic)
+        # penalty weights
         self.w_action = -0.1       # action smoothness penalty
         self.w_limit  = -10.0      # joint limit violation penalty
 
-        # fixed termination thresholds (matching BeyondMimic — no curriculum)
+        # fixed termination thresholds
         self.height_threshold = 0.25  # 25cm deviation from reference height
         self.ori_threshold = 0.8      # ~46 degrees from reference orientation
 
@@ -273,13 +273,19 @@ class LocoMimicEnv(gym.Env):
             ref_linv[body_id] = self.ref_data.cvel[body_id, 3:].copy()
             ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
 
-        # body position tracking reward (BeyondMimic: std=0.3, kernel=1/0.09≈11.1)
+        # Reward kernel standard deviations
+        std_pos  = 0.3
+        std_ori  = 0.4
+        std_vel  = 1.0
+        std_angv = 3.14
+
+        # body position tracking reward
         p_b_errors = []
         for body_id in self.target_bodies:
             p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
-        r_pos = np.exp(-11.1 * np.mean(p_b_errors))
+        r_pos = np.exp(-np.mean(p_b_errors) / (std_pos**2))
 
-        # body orientation tracking reward (BeyondMimic: std=0.4, kernel=1/0.16≈6.25)
+        # body orientation tracking reward
         o_b_errors = []
         for body_id in self.target_bodies:
             R_curr = current_rot[body_id]
@@ -288,21 +294,21 @@ class LocoMimicEnv(gym.Env):
             cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
             angle = np.arccos(cos_angle)
             o_b_errors.append(angle**2)
-        r_ori = np.exp(-6.25 * np.mean(o_b_errors))
+        r_ori = np.exp(-np.mean(o_b_errors) / (std_ori**2))
 
-        # body linear velocity tracking reward (BeyondMimic: std=1.0, kernel=1.0)
+        # body linear velocity tracking reward
         v_b_errors = []
         for body_id in self.target_bodies:
             v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
-        r_vel = np.exp(-1.0 * np.mean(v_b_errors))
+        r_vel = np.exp(-np.mean(v_b_errors) / (std_vel**2))
 
-        # body angular velocity tracking reward (BeyondMimic: std=3.14, kernel=1/9.87≈0.1)
+        # body angular velocity tracking reward
         av_b_errors = []
         for body_id in self.target_bodies:
             av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
-        r_angv = np.exp(-0.1 * np.mean(av_b_errors))
+        r_angv = np.exp(-np.mean(av_b_errors) / (std_angv**2))
 
-        # tracking reward: weighted sum (BeyondMimic uses equal weights of 1.0)
+        # tracking reward: weighted sum
         r_tracking = (self.w_pos * r_pos + 
                       self.w_ori * r_ori + 
                       self.w_vel * r_vel + 
@@ -332,8 +338,8 @@ class LocoMimicEnv(gym.Env):
 
     def _is_terminated(self):
         """
-        Checks if the episode should end early (matching BeyondMimic).
-        Uses fixed thresholds — no dynamic curriculum.
+        Checks if the episode should end early.
+        Uses fixed thresholds and no dynamic curriculum.
         Terminates if root height or orientation deviates too far from reference.
         """
 
