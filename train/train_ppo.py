@@ -33,7 +33,7 @@ def train(config_path='train/configs/ppo_config.yaml'):
     agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
 
     # create directories
-    os.makedirs('models', exist_ok=True)
+    os.makedirs('models/ppo', exist_ok=True)
     os.makedirs('logs', exist_ok=True)
 
     print(f'Device: {config.device}')
