@@ -65,5 +65,5 @@ train/
   train.py            — main training loop with wandb logging
 scripts/
   random_baseline.py  — random agent evaluation
-visualize.py          — interactive motion visualization
+visualize.py          — motion visualization
 ```
