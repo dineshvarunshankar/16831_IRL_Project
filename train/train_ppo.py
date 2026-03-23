@@ -31,16 +31,19 @@ def train(config_path='train/configs/ppo_config.yaml'):
 
     # create parallel environments
     def make_env():
-        return LocoMimicEnv(config.motion_path)
+        return LocoMimicEnv(config.motion_path, config=config)
     
     n_envs = getattr(config, 'n_envs', 1)
     if n_envs > 1:
         env = gym.vector.AsyncVectorEnv([make_env for _ in range(n_envs)])
+        obs_dim = env.single_observation_space.shape[0]
+        act_dim = env.single_action_space.shape[0]
     else:
         env = gym.vector.SyncVectorEnv([make_env])
+        obs_dim = env.single_observation_space.shape[0]
+        act_dim = env.single_action_space.shape[0]
 
-    # Agent initialized with batched dimensions
-    agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
+    agent = PPOAgent(obs_dim=obs_dim, act_dim=act_dim, config=config)
 
     # create directories
     os.makedirs('models/ppo', exist_ok=True)
@@ -49,6 +52,8 @@ def train(config_path='train/configs/ppo_config.yaml'):
     print(f'Device: {config.device}')
     print(f'Training for {config.total_steps} steps')
     print(f'Envs: {n_envs}')
+    print(f'Obs dim: {obs_dim}')
+    print(f'Act dim: {act_dim}')
     print(f'Steps per env per rollout: {agent.steps_per_env}')
     print(f'Batch size: {config.batch_size}')
     print(f'N epochs: {config.n_epochs}')
@@ -107,6 +112,11 @@ def train(config_path='train/configs/ppo_config.yaml'):
                 'entropy': losses['entropy'],
                 'step': global_step,
             })
+
+        if global_step % 100000 < (agent.steps_per_env * n_envs):
+            progress = global_step / config.total_steps
+            env.call('update_curriculum', progress)
+            print(f'Curriculum updated at step {global_step}: progress={progress:.3f}')
 
         # Checkpoints
         if global_step % config.save_freq < (agent.steps_per_env * n_envs):

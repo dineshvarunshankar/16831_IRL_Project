@@ -17,13 +17,27 @@ args = parser.parse_args()
 if args.algo == 'ppo':
     config_path = args.config if args.config else 'train/configs/ppo_config.yaml'
     config = load_ppo_config(config_path)
-    agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
 else:
     config_path = args.config if args.config else 'train/configs/sac_config.yaml'
     config = load_config(config_path)
-    agent = SACAgent(obs_dim=139, act_dim=29, config=config)
-
-env = LocoMimicEnv(config.motion_path, render_mode='human' if args.render else None)
+env = LocoMimicEnv(
+    config.motion_path,
+    config=config if args.algo == 'ppo' else None,
+    render_mode='human' if args.render else None,
+)
+if args.algo == 'ppo':
+    config.n_envs = 1
+    agent = PPOAgent(
+        obs_dim=env.observation_space.shape[0],
+        act_dim=env.action_space.shape[0],
+        config=config,
+    )
+else:
+    agent = SACAgent(
+        obs_dim=env.observation_space.shape[0],
+        act_dim=env.action_space.shape[0],
+        config=config,
+    )
 agent.load(args.checkpoint)
 
 episode_returns = []
@@ -36,9 +50,10 @@ for ep in range(args.episodes):
     steps = 0
 
     while not done:
-        action = agent.select_action(obs, deterministic=args.deterministic)
         if args.algo == 'ppo':
-            action = action[0]  # PPO returns (action, log_prob, value)
+            action, _, _ = agent.select_action(obs, deterministic=args.deterministic)
+        else:
+            action = agent.select_action(obs, deterministic=args.deterministic)
             
         obs, reward, terminated, truncated, _ = env.step(action)
 

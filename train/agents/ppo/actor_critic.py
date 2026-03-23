@@ -1,87 +1,94 @@
 """
-ActorCritic — Separate Actor and Critic Networks for PPO
-Both use orthogonal initialization.
-Actor output is squashed to [-1, 1] via tanh.
+Actor-critic modules for PPO with squashed Gaussian actions.
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 
 
 def orthogonal_init(module, gain=np.sqrt(2)):
-    """Orthogonal weight initialization"""
     if isinstance(module, nn.Linear):
         nn.init.orthogonal_(module.weight, gain=gain)
         nn.init.zeros_(module.bias)
 
 
 class Actor(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dims=[512, 256, 128], activation="elu"):
+    def __init__(
+        self,
+        obs_dim,
+        act_dim,
+        hidden_dims=[512, 256, 128],
+        activation="elu",
+        init_log_std=-1.5,
+    ):
         super().__init__()
-        act_layer = nn.ELU if activation.lower() == 'elu' else nn.ReLU
-        
+        act_layer = nn.ELU if activation.lower() == "elu" else nn.ReLU
+
         layers = []
         d = obs_dim
         for h in hidden_dims:
             layers.append(nn.Linear(d, h))
             layers.append(act_layer())
             d = h
-            
+
         self.net = nn.Sequential(*layers)
         self.mean_head = nn.Linear(hidden_dims[-1], act_dim)
+        self.log_std = nn.Parameter(torch.full((act_dim,), init_log_std))
 
-        # learnable log_std (state-independent)
-        self.log_std = nn.Parameter(torch.zeros(act_dim))
-
-        # orthogonal init
         self.net.apply(orthogonal_init)
-        orthogonal_init(self.mean_head, gain=0.01)  # small init for action head
+        orthogonal_init(self.mean_head, gain=0.01)
 
     def forward(self, state):
-        """Returns action mean and std"""
         x = self.net(state)
         mean = self.mean_head(x)
-        std = self.log_std.exp().expand_as(mean)
+        log_std = self.log_std.clamp(-5.0, 2.0).expand_as(mean)
+        std = log_std.exp()
         return mean, std
 
     def get_distribution(self, state):
-        """Returns a Normal distribution over actions"""
         mean, std = self.forward(state)
         return torch.distributions.Normal(mean, std)
 
+    @staticmethod
+    def _atanh(x):
+        x = x.clamp(-0.999999, 0.999999)
+        return 0.5 * (torch.log1p(x) - torch.log1p(-x))
+
+    @staticmethod
+    def _squash_log_prob(dist, pre_tanh_action, action):
+        log_prob = dist.log_prob(pre_tanh_action).sum(dim=-1, keepdim=True)
+        correction = torch.log(1.0 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+        return log_prob - correction
+
     def log_prob(self, state, action):
-        """
-        Compute log probability of action under current policy.
-        """
         dist = self.get_distribution(state)
-        return dist.log_prob(action).sum(dim=-1, keepdim=True)
+        pre_tanh_action = self._atanh(action)
+        return self._squash_log_prob(dist, pre_tanh_action, action)
 
     def sample(self, state):
-        """Sample action from Gaussian distribution, return action and log_prob"""
         dist = self.get_distribution(state)
-        action = dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
-
+        pre_tanh_action = dist.rsample()
+        action = torch.tanh(pre_tanh_action)
+        log_prob = self._squash_log_prob(dist, pre_tanh_action, action)
         return action, log_prob
 
 
 class Critic(nn.Module):
     def __init__(self, obs_dim, hidden_dims=[512, 256, 128], activation="elu"):
         super().__init__()
-        act_layer = nn.ELU if activation.lower() == 'elu' else nn.ReLU
-        
+        act_layer = nn.ELU if activation.lower() == "elu" else nn.ReLU
+
         layers = []
         d = obs_dim
         for h in hidden_dims:
             layers.append(nn.Linear(d, h))
             layers.append(act_layer())
             d = h
-            
+
         layers.append(nn.Linear(hidden_dims[-1], 1))
         self.net = nn.Sequential(*layers)
 
-        # orthogonal init (output layer with gain=1.0)
         self.net.apply(orthogonal_init)
         orthogonal_init(self.net[-1], gain=1.0)
 

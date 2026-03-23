@@ -1,396 +1,440 @@
 """
-LocoMimicEnv — Motion Imitation Environment for Humanoid Locomotion
+DeepMimic-style locomotion imitation environment for Unitree G1.
 
-A Gymnasium environment where a humanoid robot learns to imitate a reference
-walking motion through reinforcement learning. At each timestep the robot
-receives a reward based on how closely its pose, velocity, and end effector
-positions match the reference motion. The robot is controlled via a PD
-controller that takes normalized joint position targets as actions.
-
-Inspired by DeepMimic (Peng et al. 2018) but simplified and generalized —
-not tied to a specific robot, reward weights are fixed rather than tuned
-per motion, and termination is relative to the reference rather than absolute.
-
-Reference motion is loaded via MotionClip from a pre-retargeted CSV file.
-Robot model is loaded from a MuJoCo XML file.
-
-Usage:
-    env = LocoMimicEnv('data/lafan1_retargeted/g1/walk1_subject1.csv')
-    obs, _ = env.reset()
-    obs, reward, terminated, truncated, _ = env.step(action)
+The environment tracks a processed reference motion using:
+- heading-local observations
+- residual target-angle control around the reference motion
+- imitation rewards on joint, root, end-effector, and contact features
+- curriculum-friendly reset and termination settings
 """
 
-import numpy as np 
-import mujoco 
-import gymnasium as gym 
-from env.motion_clip import MotionClip
-import mujoco.viewer
+from __future__ import annotations
+
+import os
 import time
 
-G1_XML = "mujoco_menagerie/unitree_g1/scene.xml"
+import gymnasium as gym
+import mujoco
+import mujoco.viewer
+import numpy as np
+
+from env.motion_clip import (
+    DEFAULT_MODEL_XML,
+    LEFT_FOOT_SITE,
+    RIGHT_FOOT_SITE,
+    LEFT_HAND_BODY,
+    RIGHT_HAND_BODY,
+    ROOT_BODY,
+    MotionClip,
+)
+
 
 class LocoMimicEnv(gym.Env):
-    def __init__(self, motion_clip_path, render_mode=None):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-        """
-        Sets up the simulation environment, robot model, reference motion,
-        PD controller, and RL spaces. Everything the environment needs to
-        run episodes is initialized here.
-        """
-
-        # load mujoco model
-        self.model = mujoco.MjModel.from_xml_path(G1_XML)
+    def __init__(self, motion_clip_path, config=None, render_mode=None):
+        self.config = config
+        model_xml = os.path.join(os.path.dirname(__file__), "..", DEFAULT_MODEL_XML)
+        model_xml = os.path.normpath(model_xml)
+        self.model = mujoco.MjModel.from_xml_path(model_xml)
         self.data = mujoco.MjData(self.model)
-        self.ref_data = mujoco.MjData(self.model)  # separate data for reference FK
+        self.ref_data = mujoco.MjData(self.model)
 
-        # load motion reference clip
-        self.motion = MotionClip(motion_clip_path)
-
-        # sim parameters
         self.fps = 30
-        self.dt = 1.0/ self.fps
+        self.dt = 1.0 / self.fps
         self.n_substeps = int(round(self.dt / self.model.opt.timestep))
+        self.max_steps = int(getattr(config, "episode_length", 1000))
 
-        mujoco.mj_resetData(self.model, self.data)
-        mujoco.mj_forward(self.model, self.data)
-        self.default_joint_pos = self.data.qpos[7:].copy()
+        self.action_scale = float(getattr(config, "action_scale", 0.1))
+        self.reset_joint_noise = float(getattr(config, "reset_joint_noise", 0.0))
+        self.reset_vel_noise = float(getattr(config, "reset_vel_noise", 0.0))
+        self.contact_height_threshold = float(
+            getattr(config, "contact_height_threshold", 0.06)
+        )
+        self.contact_vel_threshold = float(
+            getattr(config, "contact_vel_threshold", 0.35)
+        )
 
-        # pd control params
-        #self.model.nu - number of actuators
-        self.kp = np.full(self.model.nu, 500.0)
-        self.kd = 2.0 * np.sqrt(self.kp)
+        self.future_offsets = list(getattr(config, "future_offsets", [0, 1, 2, 4]))
+        if 0 not in self.future_offsets:
+            self.future_offsets = [0] + self.future_offsets
+        self.future_offsets = sorted(set(self.future_offsets))
 
-        #each component of action only shifts the joint target by +/- 0.5 radians atmostfrom the default position (per dimension)
-        self.action_scale = 0.5
+        self.reset_phase_start = float(getattr(config, "reset_phase_start", 0.0))
+        self.reset_phase_end = float(getattr(config, "reset_phase_end", 0.15))
+        self.initial_reset_phase_end = self.reset_phase_end
 
-        # action space
-        #box - continuous values
+        self.final_height_threshold = float(getattr(config, "height_threshold", 0.25))
+        self.initial_height_threshold = float(
+            getattr(config, "initial_height_threshold", 0.45)
+        )
+        self.height_threshold = self.initial_height_threshold
+
+        self.final_ori_threshold = float(getattr(config, "ori_threshold", 0.8))
+        self.initial_ori_threshold = float(
+            getattr(config, "initial_ori_threshold", 1.5)
+        )
+        self.ori_threshold = self.initial_ori_threshold
+        self.min_root_height = float(getattr(config, "min_root_height", 0.45))
+
+        self.pose_reward_weight = float(getattr(config, "pose_reward_weight", 0.40))
+        self.vel_reward_weight = float(getattr(config, "vel_reward_weight", 0.10))
+        self.root_reward_weight = float(getattr(config, "root_reward_weight", 0.20))
+        self.root_vel_reward_weight = float(
+            getattr(config, "root_vel_reward_weight", 0.15)
+        )
+        self.eff_reward_weight = float(getattr(config, "eff_reward_weight", 0.10))
+        self.contact_reward_weight = float(
+            getattr(config, "contact_reward_weight", 0.05)
+        )
+
+        self.pose_sigma = float(getattr(config, "pose_sigma", 0.35))
+        self.vel_sigma = float(getattr(config, "vel_sigma", 2.0))
+        self.root_sigma = float(getattr(config, "root_sigma", 0.35))
+        self.root_vel_sigma = float(getattr(config, "root_vel_sigma", 1.0))
+        self.eff_sigma = float(getattr(config, "eff_sigma", 0.12))
+
+        self.action_rate_weight = float(getattr(config, "action_rate_weight", 0.01))
+        self.joint_limit_weight = float(getattr(config, "joint_limit_weight", 2.0))
+
+        self.motion = MotionClip(
+            motion_clip_path,
+            model_xml=DEFAULT_MODEL_XML,
+            fps=self.fps,
+            smoothing_window=int(getattr(config, "smoothing_window", 5)),
+            contact_height_threshold=self.contact_height_threshold,
+            contact_vel_threshold=self.contact_vel_threshold,
+        )
+
+        self.root_body_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, ROOT_BODY
+        )
+        self.hand_body_ids = np.array(
+            [
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, LEFT_HAND_BODY),
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, RIGHT_HAND_BODY),
+            ],
+            dtype=np.int32,
+        )
+        self.foot_site_ids = np.array(
+            [
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, LEFT_FOOT_SITE),
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, RIGHT_FOOT_SITE),
+            ],
+            dtype=np.int32,
+        )
+
         self.action_space = gym.spaces.Box(
-            low = -1.0, high = 1.0,
-            shape = (self.model.nu,),
-            dtype = np.float32 
+            low=-1.0,
+            high=1.0,
+            shape=(self.model.nu,),
+            dtype=np.float32,
         )
 
-        # observation space
-        """
-        robot root height (1,)
-        robot root quat   (4,)
-        robot joint pos   (29,)
-        robot joint vel   (29,)
-        robot root vel    (3,)
-        robot root angvel (3,)
-        ref root height   (1,)
-        ref root quat     (4,)
-        ref joint pos     (29,)
-        ref joint vel     (29,)
-        ref root vel      (3,)
-        ref root angvel   (3,)
-        phase             (1,)
-        ─────────────────────
-        total             (139,)
-
-
-        phase - current index of the reference motion clip
-        """
-
-        obs_dim = 139
+        self.base_obs_dim = (
+            self.model.nu
+            + self.model.nu
+            + 1
+            + 6
+            + 3
+            + 3
+            + 12
+            + 2
+            + self.model.nu
+            + 1
+        )
+        self.ref_obs_dim = self.model.nu + self.model.nu + 1 + 6 + 3 + 3 + 12 + 2
+        self.obs_dim = self.base_obs_dim + len(self.future_offsets) * self.ref_obs_dim
         self.observation_space = gym.spaces.Box(
-            low=-np.inf, high=np.inf,
-            shape=(obs_dim,),
-            dtype=np.float32
+            low=-np.inf,
+            high=np.inf,
+            shape=(self.obs_dim,),
+            dtype=np.float32,
         )
-        
-        # state stuff to track across timesteps
-        self.phase = 0
-        self.last_action = np.zeros(self.model.nu)
-        self.n_steps = 0 # counts env steps in current episode 
-        self.max_steps = 1000 # corresponds to about 33 seconds at 30 fps
 
-        # render stuff
+        self.phase = 0
+        self.n_steps = 0
+        self.last_action = np.zeros(self.model.nu, dtype=np.float32)
+        self.prev_foot_positions = np.zeros((2, 3), dtype=np.float32)
+        self.current_features = None
+        self.reference_features = None
+
         self.render_mode = render_mode
         self.viewer = None
         self.renderer = None
 
-        #reward 
-        # nbody - number of rigid bodies in the model
-        # range(1, self.model.nbody) - returns a list of body indices starting from 1 to nbody-1. 0 - is the world body(scene, ground, etc. which doesnt have to imitate anything)
-        self.target_bodies = list(range(1, self.model.nbody))
-
-        # Reward weights
-        self.w_pos  = 1.0      # body position tracking
-        self.w_ori  = 1.0      # body orientation tracking  
-        self.w_vel  = 1.0      # linear velocity tracking
-        self.w_angv = 1.0      # angular velocity tracking
-
-        # penalty weights
-        self.w_action = -0.1       # action smoothness penalty
-        self.w_limit  = -10.0      # joint limit violation penalty
-
-        # fixed termination thresholds
-        self.height_threshold = 0.25  # 25cm deviation from reference height
-        self.ori_threshold = 0.8      # ~46 degrees from reference orientation
+    def update_curriculum(self, progress: float):
+        progress = float(np.clip(progress, 0.0, 1.0))
+        self.height_threshold = (
+            (1.0 - progress) * self.initial_height_threshold
+            + progress * self.final_height_threshold
+        )
+        self.ori_threshold = (
+            (1.0 - progress) * self.initial_ori_threshold
+            + progress * self.final_ori_threshold
+        )
+        self.reset_phase_end = (
+            (1.0 - progress) * self.initial_reset_phase_end + progress * 1.0
+        )
 
     def reset(self, seed=None, options=None):
-        """
-        Starts a new episode by placing the robot at a random point in the
-        reference motion clip. By starting at random phases, the policy gets 
-        exposed to all parts of the motion during training, not just the beginning.
-        (Inspired by DeepMimic)
-        """
         super().reset(seed=seed)
-
-        # initialize phase at random points from the motion clip
-        #TODO
-        self.phase = np.random.randint(0, len(self.motion)) # will following any other dist help for long horizon? idk
-
-        # set the mujoco model to ref pose from the motion clip at sampled phase 
-        self.data.qpos[:] = self.motion.get_qpos(self.phase) 
+        self.phase = self._sample_reset_phase()
+        self.data.qpos[:] = self.motion.get_qpos(self.phase)
         self.data.qvel[:] = self.motion.get_qvel(self.phase)
 
-        # random perturbation for robustness
-        #np.random.normal(mean, std, size)
-        #TODO
-        self.data.qpos[7:] += np.random.normal(0, 0.01, self.model.nu)
-        self.data.qvel[6:] += np.random.normal(0, 0.01, self.model.nu)
+        if self.reset_joint_noise > 0.0:
+            self.data.qpos[7:] += self.np_random.normal(
+                0.0, self.reset_joint_noise, self.model.nu
+            )
+        if self.reset_vel_noise > 0.0:
+            self.data.qvel[6:] += self.np_random.normal(
+                0.0, self.reset_vel_noise, self.model.nu
+            )
 
-        # update all body positions
-        #calculates the cartesian positions, orientation, velocities, and angular velocities of all the bodies in the model
         mujoco.mj_forward(self.model, self.data)
 
-        # reset no. of steps and last action 
         self.n_steps = 0
-        self.last_action = np.zeros(self.model.nu)
+        self.last_action = np.zeros(self.model.nu, dtype=np.float32)
+        self.prev_foot_positions = self.data.site_xpos[self.foot_site_ids].copy()
+        self._update_tracking_cache()
 
-
-        return self._get_obs().astype(np.float32), {}
+        return self._get_obs(), {}
 
     def step(self, action):
-        """
-        Advances the simulation by one policy step. Applies the action via PD
-        control, steps the physics n_substeps times, then returns the standard
-        Gymnasium tuple. The phase advances by one frame per step, looping
-        back to the start when the clip ends.
-        """
-        self._apply_pd_control(action)
-        
-        #
-        for i in range(self.n_substeps):
+        action = np.asarray(action, dtype=np.float32)
+        action = np.clip(action, -1.0, 1.0)
+        self._apply_reference_targets(action)
+
+        for _ in range(self.n_substeps):
             mujoco.mj_step(self.model, self.data)
-        
+
         self.n_steps += 1
         self.phase = (self.phase + 1) % len(self.motion)
+        self._update_tracking_cache()
 
-        #returns 
         obs = self._get_obs()
         reward = self._compute_reward(action)
-        self.last_action = action.copy()
         terminated = self._is_terminated()
         truncated = self.n_steps >= self.max_steps
-        info = {}
+        self.last_action = action.copy()
 
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncated, {}
+
+    def _sample_reset_phase(self) -> int:
+        phase_start = int(self.reset_phase_start * len(self.motion))
+        phase_end = max(phase_start + 1, int(self.reset_phase_end * len(self.motion)))
+        return int(self.np_random.integers(phase_start, phase_end))
+
+    def _apply_reference_targets(self, action: np.ndarray):
+        ref_joint_pos = self.motion.get_qpos(self.phase)[7:]
+        target_pos = ref_joint_pos + action * self.action_scale
+        self.data.ctrl[:] = target_pos
+
+    def _update_tracking_cache(self):
+        self.reference_features = self.motion.get_features(self.phase)
+        self.current_features = self._extract_current_features()
+
+    def _extract_current_features(self):
+        if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
+            return {
+                "joint_pos": np.zeros(self.model.nu, dtype=np.float32),
+                "joint_vel": np.zeros(self.model.nu, dtype=np.float32),
+                "root_height": np.zeros(1, dtype=np.float32),
+                "root_rot_6d": np.zeros(6, dtype=np.float32),
+                "root_lin_vel_local": np.zeros(3, dtype=np.float32),
+                "root_ang_vel_local": np.zeros(3, dtype=np.float32),
+                "effector_pos_local": np.zeros(12, dtype=np.float32),
+                "foot_contacts": np.zeros(2, dtype=np.float32),
+                "root_rot_world": np.eye(3, dtype=np.float32),
+            }
+
+        root_rot_world = self.data.xmat[self.root_body_id].reshape(3, 3)
+        heading_rot = self._heading_frame(root_rot_world)
+        heading_inv = heading_rot.T
+        rel_root_rot = heading_inv @ root_rot_world
+
+        root_pos_world = self.data.xpos[self.root_body_id]
+        foot_pos_world = self.data.site_xpos[self.foot_site_ids].copy()
+        hand_pos_world = self.data.xpos[self.hand_body_ids].copy()
+        effectors_world = np.concatenate([foot_pos_world, hand_pos_world], axis=0)
+        effector_pos_local = (
+            heading_inv @ (effectors_world - root_pos_world).T
+        ).T.reshape(-1)
+
+        foot_vel_world = (foot_pos_world - self.prev_foot_positions) / self.dt
+        foot_speed = np.linalg.norm(foot_vel_world, axis=1)
+        foot_contacts = (
+            (foot_pos_world[:, 2] < self.contact_height_threshold)
+            & (foot_speed < self.contact_vel_threshold)
+        ).astype(np.float32)
+        self.prev_foot_positions = foot_pos_world
+
+        return {
+            "joint_pos": self.data.qpos[7:].copy().astype(np.float32),
+            "joint_vel": self.data.qvel[6:].copy().astype(np.float32),
+            "root_height": self.data.qpos[2:3].copy().astype(np.float32),
+            "root_rot_6d": self._rotmat_to_6d(rel_root_rot),
+            "root_lin_vel_local": (heading_inv @ self.data.qvel[0:3]).astype(np.float32),
+            "root_ang_vel_local": (heading_inv @ self.data.qvel[3:6]).astype(np.float32),
+            "effector_pos_local": effector_pos_local.astype(np.float32),
+            "foot_contacts": foot_contacts.astype(np.float32),
+            "root_rot_world": root_rot_world.astype(np.float32),
+        }
+
+    def _reference_to_dict(self, ref_frame):
+        return {
+            "joint_pos": ref_frame.joint_pos,
+            "joint_vel": ref_frame.joint_vel,
+            "root_height": ref_frame.root_height,
+            "root_rot_6d": ref_frame.root_rot_6d,
+            "root_lin_vel_local": ref_frame.root_lin_vel_local,
+            "root_ang_vel_local": ref_frame.root_ang_vel_local,
+            "effector_pos_local": ref_frame.effector_pos_local,
+            "foot_contacts": ref_frame.foot_contacts,
+        }
 
     def _get_obs(self):
-        """
-        Builds the observation vector by combining the robot's current state
-        with the reference state at the current phase. The policy uses this
-        to see both where the robot is and where it should be, so it can
-        compute the error and correct itself.
-        """
+        if self.current_features is None:
+            return np.zeros(self.obs_dim, dtype=np.float32)
 
-        # Handle physics NaN explosions by returning a zeroed terminal state
-        if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
-            return np.zeros(self.observation_space.shape[0], dtype=np.float32)
+        current = self.current_features
+        phase_norm = np.array([self.phase / len(self.motion)], dtype=np.float32)
 
-        # get robot state from mujoco
-        #qpos[0:2] - x,y position of the root ignored to make policy invariant to translation
-        root_height = self.data.qpos[2:3]
-        root_quat   = self.data.qpos[3:7]
-        joint_pos   = self.data.qpos[7:]
-        root_vel    = self.data.qvel[0:3]
-        root_angvel = self.data.qvel[3:6]
-        joint_vel   = self.data.qvel[6:]
+        obs_parts = [
+            current["joint_pos"],
+            current["joint_vel"],
+            current["root_height"],
+            current["root_rot_6d"],
+            current["root_lin_vel_local"],
+            current["root_ang_vel_local"],
+            current["effector_pos_local"],
+            current["foot_contacts"],
+            self.last_action.astype(np.float32),
+            phase_norm,
+        ]
 
-        # get ref pose from motion clip
-        ref_qpos = self.motion.get_qpos(self.phase)
-        ref_qvel = self.motion.get_qvel(self.phase)
+        for offset in self.future_offsets:
+            ref = self._reference_to_dict(self.motion.get_features(self.phase + offset))
+            obs_parts.extend(
+                [
+                    ref["joint_pos"],
+                    ref["joint_vel"],
+                    ref["root_height"],
+                    ref["root_rot_6d"],
+                    ref["root_lin_vel_local"],
+                    ref["root_ang_vel_local"],
+                    ref["effector_pos_local"],
+                    ref["foot_contacts"],
+                ]
+            )
 
-        ref_root_height = ref_qpos[2:3]
-        ref_root_quat   = ref_qpos[3:7]
-        ref_joint_pos   = ref_qpos[7:]
-        ref_root_vel    = ref_qvel[0:3]
-        ref_root_angvel = ref_qvel[3:6]
-        ref_joint_vel   = ref_qvel[6:]
+        return np.concatenate(obs_parts).astype(np.float32)
 
-        phase_norm = np.array([self.phase / len(self.motion)])
-
-        obs = np.concatenate([
-            root_height,
-            root_quat,
-            joint_pos,
-            joint_vel,
-            root_vel,
-            root_angvel,
-            ref_root_height,
-            ref_root_quat,
-            ref_joint_pos,
-            ref_joint_vel,
-            ref_root_vel,
-            ref_root_angvel,
-            phase_norm
-        ]).astype(np.float32)
-
-        return obs
-
-    def _compute_reward(self, action):
-        """
-        Reward inspired by DeepMimic:
-        Weighted sum of exponential tracking rewards with tight kernels.
-        Each sub-reward is in [0, 1], weights sum to 1.0, so total tracking
-        reward is in [0, 1]. Small penalties are added on top.
-        """
-
-        # Immediately penalize and halt reward computation on physics explosions
+    def _compute_reward(self, action: np.ndarray) -> float:
         if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
             return -100.0
 
-        # current body positions (from live sim, no mutation)
-        current_pos = {}
-        current_rot = {}
-        current_vel = {}
-        current_ang_vel = {}
+        current = self.current_features
+        ref = self._reference_to_dict(self.reference_features)
 
-        for body_id in self.target_bodies:
-            current_pos[body_id] = self.data.xpos[body_id].copy()
-            current_rot[body_id] = self.data.xmat[body_id].reshape(3, 3).copy()
-            current_vel[body_id] = self.data.cvel[body_id, 3:].copy()
-            current_ang_vel[body_id] = self.data.cvel[body_id, 0:3].copy()
+        pose_err = np.mean((current["joint_pos"] - ref["joint_pos"]) ** 2)
+        vel_err = np.mean((current["joint_vel"] - ref["joint_vel"]) ** 2)
+        root_height_err = np.mean((current["root_height"] - ref["root_height"]) ** 2)
+        root_rot_err = np.mean((current["root_rot_6d"] - ref["root_rot_6d"]) ** 2)
+        root_lin_vel_err = np.mean(
+            (current["root_lin_vel_local"] - ref["root_lin_vel_local"]) ** 2
+        )
+        root_ang_vel_err = np.mean(
+            (current["root_ang_vel_local"] - ref["root_ang_vel_local"]) ** 2
+        )
+        eff_err = np.mean((current["effector_pos_local"] - ref["effector_pos_local"]) ** 2)
+        contact_reward = np.mean(
+            1.0 - np.abs(current["foot_contacts"] - ref["foot_contacts"])
+        )
 
-        # reference body positions (computed on separate MjData)
-        self.ref_data.qpos[:] = self.motion.get_qpos(self.phase)
-        self.ref_data.qvel[:] = self.motion.get_qvel(self.phase)
-        mujoco.mj_forward(self.model, self.ref_data)
+        r_pose = np.exp(-pose_err / (self.pose_sigma ** 2))
+        r_vel = np.exp(-vel_err / (self.vel_sigma ** 2))
+        r_root = np.exp(-(root_height_err + root_rot_err) / (self.root_sigma ** 2))
+        r_root_vel = np.exp(
+            -(root_lin_vel_err + root_ang_vel_err) / (self.root_vel_sigma ** 2)
+        )
+        r_eff = np.exp(-eff_err / (self.eff_sigma ** 2))
 
-        ref_pos  = {}
-        ref_rot  = {}
-        ref_linv = {}
-        ref_angv = {}
-        for body_id in self.target_bodies:
-            ref_pos[body_id]  = self.ref_data.xpos[body_id].copy()
-            ref_rot[body_id]  = self.ref_data.xmat[body_id].reshape(3, 3).copy()
-            ref_linv[body_id] = self.ref_data.cvel[body_id, 3:].copy()
-            ref_angv[body_id] = self.ref_data.cvel[body_id, :3].copy()
+        tracking_reward = (
+            self.pose_reward_weight * r_pose
+            + self.vel_reward_weight * r_vel
+            + self.root_reward_weight * r_root
+            + self.root_vel_reward_weight * r_root_vel
+            + self.eff_reward_weight * r_eff
+            + self.contact_reward_weight * contact_reward
+        )
 
-        # Reward kernel standard deviations
-        std_pos  = 0.3
-        std_ori  = 0.4
-        std_vel  = 1.0
-        std_angv = 3.14
+        action_rate_penalty = self.action_rate_weight * np.mean(
+            (action - self.last_action) ** 2
+        )
+        joint_limit_penalty = self.joint_limit_weight * self._joint_limit_violation()
 
-        # body position tracking reward
-        p_b_errors = []
-        for body_id in self.target_bodies:
-            p_b_errors.append(np.linalg.norm(current_pos[body_id] - ref_pos[body_id])**2)
-        r_pos = np.exp(-np.mean(p_b_errors) / (std_pos**2))
+        return float(tracking_reward - action_rate_penalty - joint_limit_penalty)
 
-        # body orientation tracking reward
-        o_b_errors = []
-        for body_id in self.target_bodies:
-            R_curr = current_rot[body_id]
-            R_ref = ref_rot[body_id]
-            R_rel = R_ref @ R_curr.T
-            cos_angle = np.clip((np.trace(R_rel) - 1) / 2, -1, 1)
-            angle = np.arccos(cos_angle)
-            o_b_errors.append(angle**2)
-        r_ori = np.exp(-np.mean(o_b_errors) / (std_ori**2))
+    def _joint_limit_violation(self) -> float:
+        joint_pos = self.data.qpos[7:]
+        lower = self.model.jnt_range[1:, 0]
+        upper = self.model.jnt_range[1:, 1]
+        below = np.clip(lower - joint_pos, 0.0, None)
+        above = np.clip(joint_pos - upper, 0.0, None)
+        return float(np.mean(below + above))
 
-        # body linear velocity tracking reward
-        v_b_errors = []
-        for body_id in self.target_bodies:
-            v_b_errors.append(np.linalg.norm(current_vel[body_id] - ref_linv[body_id])**2)
-        r_vel = np.exp(-np.mean(v_b_errors) / (std_vel**2))
-
-        # body angular velocity tracking reward
-        av_b_errors = []
-        for body_id in self.target_bodies:
-            av_b_errors.append(np.linalg.norm(current_ang_vel[body_id] - ref_angv[body_id])**2)
-        r_angv = np.exp(-np.mean(av_b_errors) / (std_angv**2))
-
-        # tracking reward: weighted sum
-        r_tracking = (self.w_pos * r_pos + 
-                      self.w_ori * r_ori + 
-                      self.w_vel * r_vel + 
-                      self.w_angv * r_angv)
-
-        # action smoothness penalty (L2 of action rate)
-        r_action = np.linalg.norm(action - self.last_action)**2
-        
-        # joint pos limits penalty
-        l_limit = self.model.jnt_range[1:, 0]
-        u_limit = self.model.jnt_range[1:, 1]
-        theta_i = self.data.qpos[7:]
-
-        limit_error = []
-        for i in range(self.model.nu):
-            limit_error.append(max(0, theta_i[i] - u_limit[i]) + max(0, l_limit[i] - theta_i[i]))
-        r_limit = np.sum(limit_error)
-
-        r_penalties = self.w_action * r_action + self.w_limit * r_limit 
-
-        # combine: tracking + penalties
-        reward = r_tracking + r_penalties
-        
-        return reward
-            
-    
-
-    def _is_terminated(self):
-        """
-        Checks if the episode should end early.
-        Uses fixed thresholds and no dynamic curriculum.
-        Terminates if root height or orientation deviates too far from reference.
-        """
-
-        # condition 0: Physics explosion (NaN)
+    def _is_terminated(self) -> bool:
         if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
             return True
 
         ref_qpos = self.motion.get_qpos(self.phase)
-
-        # condition 1: height deviation from reference (BeyondMimic: 0.25m)
         height_err = abs(self.data.qpos[2] - ref_qpos[2])
-        if height_err > self.height_threshold:
+        if self.data.qpos[2] < self.min_root_height or height_err > self.height_threshold:
             return True
 
-        # condition 2: root orientation too far from reference (BeyondMimic: 0.8 rad)
-        ref_quat   = ref_qpos[3:7]
-        robot_quat = self.data.qpos[3:7]
-        dot = np.abs(np.dot(robot_quat, ref_quat))
-        if dot < np.cos(self.ori_threshold / 2):
+        ref_rot = self._quat_to_rotmat(ref_qpos[3:7])
+        root_rot = self.current_features["root_rot_world"]
+        rel_rot = ref_rot @ root_rot.T
+        cos_angle = np.clip((np.trace(rel_rot) - 1.0) / 2.0, -1.0, 1.0)
+        ori_err = np.arccos(cos_angle)
+        if ori_err > self.ori_threshold:
             return True
 
         return False
-  
 
-    def _apply_pd_control(self, action):
-        """
-        Converts the policy's action (normalized joint position targets) into
-        actual torques sent to the robot.
-        Actions are offsets from the REFERENCE pose at the current phase,
-        not from the default standing pose.
-        This simplifies what the policy must learn.
-        (DeepMimic: PD targets centered on reference kinematic pose)
-        """
+    @staticmethod
+    def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:
+        w, x, y, z = quat_wxyz
+        return np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+            ],
+            dtype=np.float32,
+        )
 
-        ref_joint_pos = self.motion.get_qpos(self.phase)[7:]  # reference joint positions at current phase
-        target_pos = ref_joint_pos + action * self.action_scale 
+    @staticmethod
+    def _heading_frame(root_rot_world: np.ndarray) -> np.ndarray:
+        forward = root_rot_world[:, 0].copy()
+        forward[2] = 0.0
+        norm = np.linalg.norm(forward)
+        if norm < 1e-6:
+            forward = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        else:
+            forward = forward / norm
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        left = np.cross(up, forward)
+        left /= np.clip(np.linalg.norm(left), 1e-6, None)
+        return np.column_stack((forward, left, up)).astype(np.float32)
 
-        self.data.ctrl[:] =  target_pos #mujoco position actuators will handle the torques
+    @staticmethod
+    def _rotmat_to_6d(rot: np.ndarray) -> np.ndarray:
+        return np.concatenate([rot[:, 0], rot[:, 1]]).astype(np.float32)
 
     def close(self):
-        """
-        Cleans up viewer and renderer resources.
-        """
         if self.viewer is not None:
             self.viewer.close()
             self.viewer = None
@@ -399,30 +443,18 @@ class LocoMimicEnv(gym.Env):
             self.renderer = None
 
     def render(self):
-        """
-        Renders the current simulation state.
-        - 'human'     : opens an interactive viewer window
-        - 'rgb_array' : returns a (H, W, 3) numpy array for video recording
-        """
-        if self.render_mode == 'human':
+        if self.render_mode == "human":
             if self.viewer is None:
                 self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-            
-            # follow camera — tracks robot root position
-            self.viewer.cam.lookat[0] = self.data.qpos[0]  # x
-            self.viewer.cam.lookat[1] = self.data.qpos[1]  # y
-            self.viewer.cam.lookat[2] = self.data.qpos[2]  # z
-            self.viewer.cam.distance  = 3.0
-            #Horizontal angle of the camera
-            self.viewer.cam.azimuth   = 90
-            #Vertical angle of the camera
+            self.viewer.cam.lookat[:] = self.data.qpos[0:3]
+            self.viewer.cam.distance = 3.0
+            self.viewer.cam.azimuth = 90
             self.viewer.cam.elevation = -20
-            
             self.viewer.sync()
             time.sleep(self.dt)
-
-        elif self.render_mode == 'rgb_array':
+        elif self.render_mode == "rgb_array":
             if self.renderer is None:
                 self.renderer = mujoco.Renderer(self.model, height=480, width=640)
-            self.renderer.update_scene(self.data, camera='side')
+            self.renderer.update_scene(self.data, camera="side")
             return self.renderer.render()
+        return None

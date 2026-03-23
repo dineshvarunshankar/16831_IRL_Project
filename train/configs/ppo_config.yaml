@@ -11,16 +11,56 @@ gamma: 0.99
 gae_lambda: 0.95
 clip_range: 0.2
 n_epochs: 5
-batch_size: 2048
+batch_size: 1024
 rollout_steps: 4096
-ent_coef: 0.0
+ent_coef: 0.001
 vf_coef: 1.0
 max_grad_norm: 1.0
-total_steps: 20000000
+total_steps: 5000000
 
 # Parallelization
 n_envs: 8
 
+# Motion processing / observation
+future_offsets: [0, 1, 2, 4, 8]
+smoothing_window: 5
+obs_clip: 10.0
+
+# Control
+action_scale: 0.05
+init_log_std: -2.2
+
+# Episode / frozen easy curriculum
+episode_length: 1000
+reset_phase_start: 0.0
+reset_phase_end: 0.02
+reset_joint_noise: 0.0
+reset_vel_noise: 0.0
+initial_height_threshold: 0.60
+height_threshold: 0.60
+initial_ori_threshold: 2.0
+ori_threshold: 2.0
+min_root_height: 0.45
+
+# Contact heuristic
+contact_height_threshold: 0.06
+contact_vel_threshold: 0.35
+
+# Reward
+pose_reward_weight: 0.50
+vel_reward_weight: 0.10
+root_reward_weight: 0.25
+root_vel_reward_weight: 0.15
+eff_reward_weight: 0.10
+contact_reward_weight: 0.00
+pose_sigma: 0.35
+vel_sigma: 2.0
+root_sigma: 0.35
+root_vel_sigma: 1.0
+eff_sigma: 0.12
+action_rate_weight: 0.01
+joint_limit_weight: 2.0
+
 # Logging
 log_freq: 1000
-save_freq: 100000
+save_freq: 200000
