@@ -2,6 +2,7 @@
 data/
 logs/
 videos/
+models/
 
 # External repos
 # mujoco_menagerie/
@@ -18,6 +19,7 @@ __pycache__/
 .eggs/
 dist/
 build/
+MUJOCO_LOG.TXT
 
 # Environments
 .env
