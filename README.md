@@ -60,6 +60,25 @@ PYTHONPATH=. python train/train_sac.py
 # PPO
 PYTHONPATH=. python train/train_ppo.py
 
+# PPO (16-core async vectorized run)
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+PYTHONPATH=. python train/train_ppo.py \
+  --run-name ppo_walk1_16env \
+  --n-envs 16 \
+  --vector-env-type async \
+  --vector-env-context spawn \
+  --total-steps 12000000
+
+# Resume an interrupted PPO run
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+PYTHONPATH=. python train/train_ppo.py \
+  --run-name ppo_walk1_16env_resume \
+  --n-envs 16 \
+  --vector-env-type async \
+  --vector-env-context spawn \
+  --resume-checkpoint models/ppo/ppo_step_4000000.pt \
+  --total-steps 12000000
+
 # Random baseline
 PYTHONPATH=. python scripts/random_baseline.py
 ```

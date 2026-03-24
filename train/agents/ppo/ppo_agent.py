@@ -114,6 +114,12 @@ class PPOAgent(BaseAgent):
     def __init__(self, obs_dim, act_dim, config):
         self.device = config.device
         self.n_envs = getattr(config, "n_envs", 1)
+        if self.n_envs < 1:
+            raise ValueError("n_envs must be >= 1")
+        if config.rollout_steps % self.n_envs != 0:
+            raise ValueError(
+                f"rollout_steps ({config.rollout_steps}) must be divisible by n_envs ({self.n_envs})"
+            )
         self.steps_per_env = config.rollout_steps // self.n_envs
         self.obs_clip = float(getattr(config, "obs_clip", 10.0))
 
@@ -126,6 +132,7 @@ class PPOAgent(BaseAgent):
             hidden_dims,
             activation,
             init_log_std=float(getattr(config, "init_log_std", -1.5)),
+            mean_scale=float(getattr(config, "mean_scale", 0.5)),
         ).to(self.device)
         self.critic = Critic(obs_dim, hidden_dims, activation).to(self.device)
 
@@ -140,6 +147,8 @@ class PPOAgent(BaseAgent):
         self.obs_normalizer = RunningMeanStd(shape=(obs_dim,))
         self.config = config
         self._cached_state_norm = None
+        self.target_kl = float(getattr(config, "target_kl", 0.0))
+        self.residual_reg_coef = float(getattr(config, "residual_reg_coef", 0.0))
 
     def _ensure_batch(self, obs):
         obs = np.asarray(obs, dtype=np.float32)
@@ -217,8 +226,11 @@ class PPOAgent(BaseAgent):
         total_policy_loss = 0.0
         total_value_loss = 0.0
         total_entropy = 0.0
+        total_residual_reg = 0.0
+        total_approx_kl = 0.0
         n_updates = 0
 
+        early_stopped = False
         for _ in range(self.config.n_epochs):
             for states, actions, old_log_probs, advantages, returns in self.buffer.get_batches(
                 self.config.batch_size, self.device
@@ -240,11 +252,14 @@ class PPOAgent(BaseAgent):
                 policy_loss = -torch.min(surr1, surr2).mean()
                 value_loss = F.mse_loss(values, returns)
                 entropy = self.actor.get_distribution(states).entropy().sum(dim=-1).mean()
+                residual_reg = actions.pow(2).mean()
+                approx_kl = (old_log_probs - new_log_probs).mean()
 
                 loss = (
                     policy_loss
                     + self.config.vf_coef * value_loss
                     - self.config.ent_coef * entropy
+                    + self.residual_reg_coef * residual_reg
                 )
 
                 self.optimizer.zero_grad()
@@ -258,13 +273,24 @@ class PPOAgent(BaseAgent):
                 total_policy_loss += policy_loss.item()
                 total_value_loss += value_loss.item()
                 total_entropy += entropy.item()
+                total_residual_reg += residual_reg.item()
+                total_approx_kl += approx_kl.item()
                 n_updates += 1
+
+                if self.target_kl > 0.0 and approx_kl.item() > self.target_kl:
+                    early_stopped = True
+                    break
+            if early_stopped:
+                break
 
         self.buffer.reset()
         return {
             "policy_loss": total_policy_loss / max(n_updates, 1),
             "value_loss": total_value_loss / max(n_updates, 1),
             "entropy": total_entropy / max(n_updates, 1),
+            "residual_reg": total_residual_reg / max(n_updates, 1),
+            "approx_kl": total_approx_kl / max(n_updates, 1),
+            "early_stopped": float(early_stopped),
         }
 
     def save(self, path):

@@ -11,7 +11,8 @@ parser.add_argument('--algo', type=str, choices=['sac', 'ppo'], default='ppo')
 parser.add_argument('--config', type=str, default=None, help='Override default config path')
 parser.add_argument('--episodes', type=int, default=100)
 parser.add_argument('--render', action='store_true')
-parser.add_argument('--deterministic', action='store_true', help='Use mean action (no sampling)')
+parser.add_argument('--deterministic', action='store_true', help='Force deterministic (mean) actions')
+parser.add_argument('--stochastic', action='store_true', help='Force stochastic action sampling')
 args = parser.parse_args()
 
 if args.algo == 'ppo':
@@ -40,6 +41,16 @@ else:
     )
 agent.load(args.checkpoint)
 
+deterministic_default = bool(getattr(config, "eval_deterministic_default", True))
+if args.deterministic and args.stochastic:
+    raise ValueError("Use only one of --deterministic or --stochastic")
+if args.deterministic:
+    deterministic_eval = True
+elif args.stochastic:
+    deterministic_eval = False
+else:
+    deterministic_eval = deterministic_default
+
 episode_returns = []
 episode_lengths = []
 
@@ -51,9 +62,9 @@ for ep in range(args.episodes):
 
     while not done:
         if args.algo == 'ppo':
-            action, _, _ = agent.select_action(obs, deterministic=args.deterministic)
+            action, _, _ = agent.select_action(obs, deterministic=deterministic_eval)
         else:
-            action = agent.select_action(obs, deterministic=args.deterministic)
+            action = agent.select_action(obs, deterministic=deterministic_eval)
             
         obs, reward, terminated, truncated, _ = env.step(action)
 

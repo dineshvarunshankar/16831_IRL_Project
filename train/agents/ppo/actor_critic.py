@@ -21,6 +21,7 @@ class Actor(nn.Module):
         hidden_dims=[512, 256, 128],
         activation="elu",
         init_log_std=-1.5,
+        mean_scale=0.5,
     ):
         super().__init__()
         act_layer = nn.ELU if activation.lower() == "elu" else nn.ReLU
@@ -35,13 +36,15 @@ class Actor(nn.Module):
         self.net = nn.Sequential(*layers)
         self.mean_head = nn.Linear(hidden_dims[-1], act_dim)
         self.log_std = nn.Parameter(torch.full((act_dim,), init_log_std))
+        self.mean_scale = float(mean_scale)
 
         self.net.apply(orthogonal_init)
         orthogonal_init(self.mean_head, gain=0.01)
 
     def forward(self, state):
         x = self.net(state)
-        mean = self.mean_head(x)
+        # Bound deterministic residuals to reduce saturation and over-correction.
+        mean = self.mean_scale * torch.tanh(self.mean_head(x))
         log_std = self.log_std.clamp(-5.0, 2.0).expand_as(mean)
         std = log_std.exp()
         return mean, std

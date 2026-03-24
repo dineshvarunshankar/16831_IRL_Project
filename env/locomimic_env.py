@@ -63,6 +63,9 @@ class LocoMimicEnv(gym.Env):
         self.reset_phase_start = float(getattr(config, "reset_phase_start", 0.0))
         self.reset_phase_end = float(getattr(config, "reset_phase_end", 0.15))
         self.initial_reset_phase_end = self.reset_phase_end
+        self.final_reset_phase_end = float(
+            getattr(config, "final_reset_phase_end", self.reset_phase_end)
+        )
 
         self.final_height_threshold = float(getattr(config, "height_threshold", 0.25))
         self.initial_height_threshold = float(
@@ -174,7 +177,8 @@ class LocoMimicEnv(gym.Env):
             + progress * self.final_ori_threshold
         )
         self.reset_phase_end = (
-            (1.0 - progress) * self.initial_reset_phase_end + progress * 1.0
+            (1.0 - progress) * self.initial_reset_phase_end
+            + progress * self.final_reset_phase_end
         )
 
     def reset(self, seed=None, options=None):
