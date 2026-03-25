@@ -323,7 +323,13 @@ class PPOAgent(BaseAgent):
         )
 
     def load(self, path):
-        checkpoint = torch.load(path, map_location=self.device)
+        try:
+            checkpoint = torch.load(
+                path, map_location=self.device, weights_only=False
+            )
+        except TypeError:
+            # Backward compatibility for torch versions without `weights_only`.
+            checkpoint = torch.load(path, map_location=self.device)
         self.actor.load_state_dict(checkpoint["actor"])
         self.critic.load_state_dict(checkpoint["critic"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
