@@ -1,0 +1,118 @@
+nohup: ignoring input
+/opt/pytorch/lib/python3.13/site-packages/torch/cuda/__init__.py:65: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/ubuntu/.netrc.
+wandb: Currently logged in as: vkalva (vkalva-carnegie-mellon-university) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/ubuntu/16831_IRL_Project/wandb/run-20260323_165455-ha1aggun
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run sac_v3
+wandb: ⭐️ View project at https://wandb.ai/vkalva-carnegie-mellon-university/locomimic
+wandb: 🚀 View run at https://wandb.ai/vkalva-carnegie-mellon-university/locomimic/runs/ha1aggun
+wandb: uploading data; updating run metadata
+wandb: uploading data; uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: uploading data
+wandb: uploading history steps 33696-33696, summary, console lines 74-74
+wandb: 
+wandb: Run history:
+wandb:            agent/alpha ▁▁▁█▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:        agent/log_alpha ▂▆▇██▃▃▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▁▁▁▁▁
+wandb:               env_step ▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▄▅▅▅▆▆▆▆▆▇█
+wandb: episode/avg_return_100 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▃▄▅▆▇▆█
+wandb:  episode/avg_steps_100 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▁▁▁▂▂▃▄▅▅▆▆▆█
+wandb:            episode/num ▁▁▁▂▂▂▂▂▂▂▂▂▃▃▄▄▄▄▄▄▅▅▅▅▅▅▅▅▅▆▆▆▆▇▇▇▇███
+wandb:         episode/return ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▁█
+wandb:          episode/steps ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▁▁▂▁▂▁▁▁▄▂▁▂▃▇█
+wandb:     episode/terminated ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: 
+wandb: Run summary:
+wandb:            agent/alpha 0.02039
+wandb:        agent/log_alpha -3.89255
+wandb:               env_step 1999258
+wandb: episode/avg_return_100 923.09818
+wandb:  episode/avg_steps_100 421.88
+wandb:            episode/num 33696
+wandb:         episode/return 765.64407
+wandb:          episode/steps 321
+wandb:     episode/terminated 1
+wandb: 
+wandb: 🚀 View run sac_v3 at: https://wandb.ai/vkalva-carnegie-mellon-university/locomimic/runs/ha1aggun
+wandb: ⭐️ View project at: https://wandb.ai/vkalva-carnegie-mellon-university/locomimic
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260323_165455-ha1aggun/logs
+Run    : sac_v3
+Device : cuda
+Steps  : 2000000
+Step      17 | Ep     0 | Return    43.50 | Steps   18 | Avg100 R=  43.50 L= 18.0 | α=0.0010
+Step    7789 | Ep   500 | Return    28.70 | Steps   11 | Avg100 R=  37.85 L= 15.0 | α=0.0010
+Step   15392 | Ep  1000 | Return    40.59 | Steps   18 | Avg100 R=  32.65 L= 15.2 | α=0.0061
+Step   23091 | Ep  1500 | Return    21.93 | Steps    9 | Avg100 R=  32.86 L= 15.6 | α=0.0682
+Step   30842 | Ep  2000 | Return    22.20 | Steps    9 | Avg100 R=  31.34 L= 15.1 | α=0.7268
+Step   38596 | Ep  2500 | Return    34.05 | Steps   14 | Avg100 R=  34.00 L= 16.5 | α=6.8437
+Step   46765 | Ep  3000 | Return    38.31 | Steps   15 | Avg100 R=  41.94 L= 17.2 | α=26.1994
+Step   55166 | Ep  3500 | Return    47.15 | Steps   21 | Avg100 R=  38.60 L= 16.3 | α=8.3525
+Step   63197 | Ep  4000 | Return    34.83 | Steps   14 | Avg100 R=  39.81 L= 16.8 | α=4.0861
+Step   71637 | Ep  4500 | Return    37.08 | Steps   17 | Avg100 R=  40.03 L= 16.9 | α=1.8119
+Step   80288 | Ep  5000 | Return    36.80 | Steps   17 | Avg100 R=  40.26 L= 17.2 | α=0.6606
+Step   88840 | Ep  5500 | Return    29.71 | Steps   12 | Avg100 R=  40.20 L= 17.2 | α=0.2344
+Step   97387 | Ep  6000 | Return    42.67 | Steps   20 | Avg100 R=  42.18 L= 18.2 | α=0.0952
+Step  106400 | Ep  6500 | Return    91.99 | Steps   41 | Avg100 R=  43.01 L= 18.0 | α=0.0558
+Step  115298 | Ep  7000 | Return    35.17 | Steps   13 | Avg100 R=  42.68 L= 17.5 | α=0.0530
+Step  124191 | Ep  7500 | Return    36.96 | Steps   14 | Avg100 R=  42.55 L= 17.7 | α=0.0505
+Step  133160 | Ep  8000 | Return    42.56 | Steps   19 | Avg100 R=  42.93 L= 17.8 | α=0.0464
+Step  142565 | Ep  8500 | Return    29.82 | Steps   12 | Avg100 R=  46.86 L= 19.4 | α=0.0412
+Step  151814 | Ep  9000 | Return    53.29 | Steps   23 | Avg100 R=  44.20 L= 18.2 | α=0.0367
+Step  161459 | Ep  9500 | Return    60.69 | Steps   26 | Avg100 R=  44.98 L= 18.4 | α=0.0330
+Step  170622 | Ep 10000 | Return    35.96 | Steps   17 | Avg100 R=  43.13 L= 17.5 | α=0.0302
+Step  180097 | Ep 10500 | Return    38.80 | Steps   15 | Avg100 R=  46.93 L= 19.3 | α=0.0281
+Step  189563 | Ep 11000 | Return    34.09 | Steps   14 | Avg100 R=  45.80 L= 18.7 | α=0.0261
+Step  199094 | Ep 11500 | Return    22.60 | Steps    8 | Avg100 R=  48.50 L= 19.5 | α=0.0246
+Step  208539 | Ep 12000 | Return    35.85 | Steps   16 | Avg100 R=  47.69 L= 19.6 | α=0.0231
+Step  218535 | Ep 12500 | Return    54.25 | Steps   21 | Avg100 R=  51.18 L= 20.8 | α=0.0219
+Step  228563 | Ep 13000 | Return    25.54 | Steps    9 | Avg100 R=  49.95 L= 20.2 | α=0.0204
+Step  238423 | Ep 13500 | Return    44.22 | Steps   16 | Avg100 R=  51.30 L= 20.5 | α=0.0194
+Step  248743 | Ep 14000 | Return    29.73 | Steps   14 | Avg100 R=  51.61 L= 20.6 | α=0.0181
+Step  258653 | Ep 14500 | Return    35.54 | Steps   13 | Avg100 R=  48.35 L= 19.2 | α=0.0174
+Step  268941 | Ep 15000 | Return    25.63 | Steps    9 | Avg100 R=  52.47 L= 20.7 | α=0.0164
+Step  279540 | Ep 15500 | Return    57.37 | Steps   24 | Avg100 R=  54.06 L= 21.4 | α=0.0157
+Step  290725 | Ep 16000 | Return    46.51 | Steps   19 | Avg100 R=  56.03 L= 22.1 | α=0.0152
+Step  302635 | Ep 16500 | Return    73.20 | Steps   30 | Avg100 R=  62.51 L= 24.9 | α=0.0153
+Step  314971 | Ep 17000 | Return    64.21 | Steps   24 | Avg100 R=  59.63 L= 23.9 | α=0.0156
+Step  327804 | Ep 17500 | Return    63.52 | Steps   25 | Avg100 R=  62.68 L= 24.9 | α=0.0161
+Step  341154 | Ep 18000 | Return    41.10 | Steps   16 | Avg100 R=  67.06 L= 26.3 | α=0.0161
+Step  354486 | Ep 18500 | Return    70.40 | Steps   26 | Avg100 R=  66.72 L= 26.1 | α=0.0158
+Step  368329 | Ep 19000 | Return    64.30 | Steps   22 | Avg100 R=  72.43 L= 27.8 | α=0.0156
+Step  382875 | Ep 19500 | Return    63.80 | Steps   25 | Avg100 R=  77.84 L= 29.9 | α=0.0157
+Step  397756 | Ep 20000 | Return    56.17 | Steps   22 | Avg100 R=  79.77 L= 31.8 | α=0.0159
+Step  413437 | Ep 20500 | Return    46.72 | Steps   19 | Avg100 R=  80.20 L= 31.1 | α=0.0159
+Step  429548 | Ep 21000 | Return    78.62 | Steps   34 | Avg100 R=  79.58 L= 31.1 | α=0.0164
+Step  446568 | Ep 21500 | Return   104.87 | Steps   47 | Avg100 R=  85.18 L= 33.9 | α=0.0170
+Step  463931 | Ep 22000 | Return    77.81 | Steps   36 | Avg100 R=  85.94 L= 33.9 | α=0.0172
+Step  481924 | Ep 22500 | Return    62.77 | Steps   25 | Avg100 R=  90.58 L= 34.8 | α=0.0175
+Checkpoint saved: models/sac_v3/ckpt_step_500000.pt
+Step  500440 | Ep 23000 | Return   123.89 | Steps   44 | Avg100 R=  94.90 L= 36.8 | α=0.0179
+Step  519897 | Ep 23500 | Return    84.01 | Steps   38 | Avg100 R= 100.84 L= 39.6 | α=0.0189
+Step  541494 | Ep 24000 | Return   107.65 | Steps   41 | Avg100 R= 117.56 L= 46.6 | α=0.0197
+Step  563857 | Ep 24500 | Return   146.99 | Steps   61 | Avg100 R= 117.44 L= 46.3 | α=0.0202
+Step  587515 | Ep 25000 | Return   104.97 | Steps   42 | Avg100 R= 119.55 L= 46.4 | α=0.0214
+Step  611524 | Ep 25500 | Return    97.56 | Steps   42 | Avg100 R= 121.09 L= 47.4 | α=0.0218
+Step  637887 | Ep 26000 | Return    48.36 | Steps   22 | Avg100 R= 146.16 L= 59.1 | α=0.0227
+Step  666652 | Ep 26500 | Return    80.42 | Steps   34 | Avg100 R= 125.70 L= 49.7 | α=0.0236
+Step  698666 | Ep 27000 | Return   100.44 | Steps   40 | Avg100 R= 163.76 L= 64.8 | α=0.0246
+Step  733868 | Ep 27500 | Return   104.57 | Steps   36 | Avg100 R= 187.14 L= 75.5 | α=0.0240
+Step  774032 | Ep 28000 | Return   115.05 | Steps   51 | Avg100 R= 208.79 L= 86.2 | α=0.0242
+Step  814148 | Ep 28500 | Return    62.54 | Steps   27 | Avg100 R= 216.98 L= 89.2 | α=0.0242
+Step  866720 | Ep 29000 | Return   180.03 | Steps   77 | Avg100 R= 281.51 L=118.0 | α=0.0248
+Step  922986 | Ep 29500 | Return   138.35 | Steps   62 | Avg100 R= 269.19 L=113.2 | α=0.0262
+Step  984087 | Ep 30000 | Return   104.08 | Steps   47 | Avg100 R= 335.59 L=143.7 | α=0.0255
+Checkpoint saved: models/sac_v3/ckpt_step_1000000.pt
+Step 1066024 | Ep 30500 | Return   123.69 | Steps   52 | Avg100 R= 340.50 L=146.9 | α=0.0254
+Step 1171914 | Ep 31000 | Return   195.54 | Steps   83 | Avg100 R= 478.59 L=209.3 | α=0.0254
+Step 1290089 | Ep 31500 | Return  1706.63 | Steps  776 | Avg100 R= 564.66 L=251.0 | α=0.0244
+Step 1421316 | Ep 32000 | Return   464.90 | Steps  211 | Avg100 R= 554.06 L=248.3 | α=0.0235
+Checkpoint saved: models/sac_v3/ckpt_step_1500000.pt
+Step 1571353 | Ep 32500 | Return    66.34 | Steps   33 | Avg100 R= 662.06 L=297.7 | α=0.0221
+Step 1735657 | Ep 33000 | Return   136.30 | Steps   54 | Avg100 R= 668.81 L=299.5 | α=0.0217
+Step 1916538 | Ep 33500 | Return   314.65 | Steps  143 | Avg100 R= 750.98 L=343.6 | α=0.0204
+Final model saved: models/sac_v3/final.pt
+Training complete.
