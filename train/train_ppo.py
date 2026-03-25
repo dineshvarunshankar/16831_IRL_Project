@@ -74,6 +74,98 @@ def _make_env_factory(config, base_seed: int, env_rank: int):
     return _thunk
 
 
+def _aggregate_and_log_env_diagnostics(env, global_step: int):
+    try:
+        env_diags = env.call("get_and_reset_diagnostics")
+    except Exception:
+        return
+
+    if not env_diags:
+        return
+
+    total_episodes = 0
+    total_episode_len_sum = 0.0
+    total_terminated = 0
+    total_truncated = 0
+    total_reward_steps = 0
+    total_height_err_sum = 0.0
+    total_height_err_count = 0
+    total_ori_err_sum = 0.0
+    total_ori_err_count = 0
+    reset_phase_end_sum = 0.0
+
+    reason_counts = {}
+    reward_sums = {}
+    terminal_bins = None
+
+    for diag in env_diags:
+        if not isinstance(diag, dict):
+            continue
+        total_episodes += int(diag.get("episode_count", 0))
+        total_episode_len_sum += float(diag.get("episode_len_sum", 0.0))
+        total_terminated += int(diag.get("terminated_count", 0))
+        total_truncated += int(diag.get("truncated_count", 0))
+        total_reward_steps += int(diag.get("reward_step_count", 0))
+        total_height_err_sum += float(diag.get("height_err_sum", 0.0))
+        total_height_err_count += int(diag.get("height_err_count", 0))
+        total_ori_err_sum += float(diag.get("ori_err_sum", 0.0))
+        total_ori_err_count += int(diag.get("ori_err_count", 0))
+        reset_phase_end_sum += float(diag.get("reset_phase_end", 0.0))
+
+        for key, val in diag.get("reason_counts", {}).items():
+            reason_counts[key] = reason_counts.get(key, 0) + int(val)
+
+        for key, val in diag.get("reward_sums", {}).items():
+            reward_sums[key] = reward_sums.get(key, 0.0) + float(val)
+
+        bins = np.asarray(diag.get("terminal_bin_counts", []), dtype=np.float32)
+        if bins.size > 0:
+            if terminal_bins is None:
+                terminal_bins = np.zeros_like(bins, dtype=np.float32)
+            if bins.shape == terminal_bins.shape:
+                terminal_bins += bins
+
+    if total_episodes == 0 and total_reward_steps == 0:
+        return
+
+    log_data = {"step": global_step}
+    num_env_reports = max(len(env_diags), 1)
+    log_data["diag/reset_phase_end_mean"] = reset_phase_end_sum / num_env_reports
+
+    if total_episodes > 0:
+        log_data["diag/episode_len_mean"] = total_episode_len_sum / total_episodes
+        log_data["diag/terminated_ratio"] = total_terminated / total_episodes
+        log_data["diag/truncated_ratio"] = total_truncated / total_episodes
+        for key in sorted(reason_counts):
+            log_data[f"diag/term_reason_{key}_ratio"] = reason_counts[key] / total_episodes
+
+    if total_reward_steps > 0:
+        for key in sorted(reward_sums):
+            log_data[f"diag/reward_{key}_mean"] = reward_sums[key] / total_reward_steps
+
+    if total_height_err_count > 0:
+        log_data["diag/term_height_err_mean"] = total_height_err_sum / total_height_err_count
+    if total_ori_err_count > 0:
+        log_data["diag/term_ori_err_mean"] = total_ori_err_sum / total_ori_err_count
+
+    if terminal_bins is not None and terminal_bins.sum() > 0:
+        total_bin = float(terminal_bins.sum())
+        n = len(terminal_bins)
+        one_third = max(1, n // 3)
+        log_data["diag/fail_phase_early_ratio"] = float(
+            terminal_bins[:one_third].sum() / total_bin
+        )
+        log_data["diag/fail_phase_mid_ratio"] = float(
+            terminal_bins[one_third : 2 * one_third].sum() / total_bin
+        )
+        log_data["diag/fail_phase_late_ratio"] = float(
+            terminal_bins[2 * one_third :].sum() / total_bin
+        )
+        log_data["diag/fail_phase_peak_bin"] = float(np.argmax(terminal_bins))
+
+    wandb.log(log_data)
+
+
 def train(config_path="train/configs/ppo_config.yaml", args=None):
     config = load_ppo_config(config_path)
     if args is not None:
@@ -202,6 +294,8 @@ def train(config_path="train/configs/ppo_config.yaml", args=None):
                         "step": global_step,
                     }
                 )
+
+            _aggregate_and_log_env_diagnostics(env, global_step)
 
             should_update_curriculum = (
                 curriculum_mode == "linear"

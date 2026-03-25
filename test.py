@@ -1,23 +1,23 @@
-import cv2
+cd /home/ubuntu/16831/16831_IRL_Project
+python - <<'PY'
+import glob, os, json, datetime
+rows = []
+for d in glob.glob("wandb/run-*"):
+    s = os.path.join(d, "files", "wandb-summary.json")
+    if not os.path.exists(s):
+        continue
+    try:
+        data = json.load(open(s))
+    except Exception:
+        continue
+    diag = [k for k in data if k.startswith("diag/")]
+    if not diag:
+        continue
+    mtime = os.path.getmtime(d)
+    rows.append((mtime, d, data.get("step", data.get("_step", None)), len(diag)))
 
-# Initialize the camera once
-cap = cv2.VideoCapture(0)
-
-while True:
-    # Capture frame-by-frame in a loop
-    ret, frame = cap.read()
-    
-    # Check if frame was captured correctly
-    if not ret:
-        print("Failed to grab frame")
-        break
-
-    cv2.imshow('frame', frame)
-
-    # Use waitKey(1) to allow the flow and check for 'q' to quit
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-# Release the camera and close windows when finished
-cap.release()
-cv2.destroyAllWindows()
+rows.sort(reverse=True)
+for mtime, d, step, n in rows[:20]:
+    ts = datetime.datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"{ts} | {d} | step={step} | diag_keys={n}")
+PY

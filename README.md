@@ -79,6 +79,12 @@ PYTHONPATH=. python train/train_ppo.py \
   --resume-checkpoint models/ppo/ppo_step_4000000.pt \
   --total-steps 12000000
 
+# PPO long run (uses train/configs/ppo_config.yaml defaults)
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+PYTHONPATH=. python train/train_ppo.py \
+  --run-name ppo_final_30m \
+  --total-steps 30000000
+
 # Random baseline
 PYTHONPATH=. python scripts/random_baseline.py
 ```

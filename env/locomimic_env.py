@@ -6,6 +6,7 @@ The environment tracks a processed reference motion using:
 - residual target-angle control around the reference motion
 - imitation rewards on joint, root, end-effector, and contact features
 - curriculum-friendly reset and termination settings
+- optional adaptive reset-phase sampling on failure-prone motion bins
 """
 
 from __future__ import annotations
@@ -66,6 +67,32 @@ class LocoMimicEnv(gym.Env):
         self.final_reset_phase_end = float(
             getattr(config, "final_reset_phase_end", self.reset_phase_end)
         )
+        self.curriculum_mode = str(getattr(config, "curriculum_mode", "off")).lower()
+        self.competence_ema_alpha = float(
+            getattr(config, "competence_ema_alpha", 0.98)
+        )
+        self.competence_low = float(getattr(config, "competence_low", 0.10))
+        self.competence_high = float(getattr(config, "competence_high", 0.80))
+        self.episode_len_ema = 0.0
+        self.episode_len_ema_initialized = False
+
+        self.adaptive_reset_enabled = bool(
+            getattr(config, "adaptive_reset_enabled", False)
+        )
+        self.adaptive_reset_bins = int(getattr(config, "adaptive_reset_bins", 80))
+        self.adaptive_reset_warmup_episodes = int(
+            getattr(config, "adaptive_reset_warmup_episodes", 500)
+        )
+        self.adaptive_reset_uniform_mix = float(
+            getattr(config, "adaptive_reset_uniform_mix", 0.30)
+        )
+        self.adaptive_reset_smoothing = int(
+            getattr(config, "adaptive_reset_smoothing", 9)
+        )
+        self.adaptive_reset_power = float(getattr(config, "adaptive_reset_power", 1.5))
+        self.adaptive_reset_min_visits = float(
+            getattr(config, "adaptive_reset_min_visits", 5.0)
+        )
 
         self.final_height_threshold = float(getattr(config, "height_threshold", 0.25))
         self.initial_height_threshold = float(
@@ -108,6 +135,10 @@ class LocoMimicEnv(gym.Env):
             contact_height_threshold=self.contact_height_threshold,
             contact_vel_threshold=self.contact_vel_threshold,
         )
+        self.adaptive_reset_bins = max(4, min(self.adaptive_reset_bins, len(self.motion)))
+        self.adaptive_fail_counts = np.zeros(self.adaptive_reset_bins, dtype=np.float32)
+        self.adaptive_visit_counts = np.zeros(self.adaptive_reset_bins, dtype=np.float32)
+        self.completed_episodes = 0
 
         self.root_body_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_BODY, ROOT_BODY
@@ -156,6 +187,7 @@ class LocoMimicEnv(gym.Env):
         )
 
         self.phase = 0
+        self.reset_phase = 0
         self.n_steps = 0
         self.last_action = np.zeros(self.model.nu, dtype=np.float32)
         self.prev_foot_positions = np.zeros((2, 3), dtype=np.float32)
@@ -165,6 +197,20 @@ class LocoMimicEnv(gym.Env):
         self.render_mode = render_mode
         self.viewer = None
         self.renderer = None
+        self._diag_reason_keys = ("height", "orientation", "nan", "timeout", "other")
+        self._diag_reward_keys = (
+            "tracking_reward",
+            "r_pose",
+            "r_vel",
+            "r_root",
+            "r_root_vel",
+            "r_eff",
+            "contact_reward",
+            "action_rate_penalty",
+            "joint_limit_penalty",
+            "total_reward",
+        )
+        self._reset_diagnostics()
 
     def update_curriculum(self, progress: float):
         progress = float(np.clip(progress, 0.0, 1.0))
@@ -176,14 +222,52 @@ class LocoMimicEnv(gym.Env):
             (1.0 - progress) * self.initial_ori_threshold
             + progress * self.final_ori_threshold
         )
-        self.reset_phase_end = (
+        reset_phase_end = (
             (1.0 - progress) * self.initial_reset_phase_end
             + progress * self.final_reset_phase_end
         )
+        min_span = 1.0 / max(len(self.motion), 1)
+        self.reset_phase_end = float(
+            np.clip(reset_phase_end, self.reset_phase_start + min_span, 1.0)
+        )
+
+    def _reset_diagnostics(self):
+        self.diag_episode_count = 0
+        self.diag_episode_len_sum = 0.0
+        self.diag_terminated_count = 0
+        self.diag_truncated_count = 0
+        self.diag_reason_counts = {k: 0 for k in self._diag_reason_keys}
+        self.diag_reward_step_count = 0
+        self.diag_reward_sums = {k: 0.0 for k in self._diag_reward_keys}
+        self.diag_height_err_count = 0
+        self.diag_ori_err_count = 0
+        self.diag_height_err_sum = 0.0
+        self.diag_ori_err_sum = 0.0
+        self.diag_terminal_bin_counts = np.zeros(self.adaptive_reset_bins, dtype=np.float32)
+
+    def get_and_reset_diagnostics(self):
+        payload = {
+            "episode_count": int(self.diag_episode_count),
+            "episode_len_sum": float(self.diag_episode_len_sum),
+            "terminated_count": int(self.diag_terminated_count),
+            "truncated_count": int(self.diag_truncated_count),
+            "reason_counts": dict(self.diag_reason_counts),
+            "reward_step_count": int(self.diag_reward_step_count),
+            "reward_sums": dict(self.diag_reward_sums),
+            "height_err_count": int(self.diag_height_err_count),
+            "ori_err_count": int(self.diag_ori_err_count),
+            "height_err_sum": float(self.diag_height_err_sum),
+            "ori_err_sum": float(self.diag_ori_err_sum),
+            "terminal_bin_counts": self.diag_terminal_bin_counts.astype(np.float32).tolist(),
+            "reset_phase_end": float(self.reset_phase_end),
+        }
+        self._reset_diagnostics()
+        return payload
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.phase = self._sample_reset_phase()
+        self.reset_phase = self.phase
         self.data.qpos[:] = self.motion.get_qpos(self.phase)
         self.data.qvel[:] = self.motion.get_qvel(self.phase)
 
@@ -218,17 +302,137 @@ class LocoMimicEnv(gym.Env):
         self._update_tracking_cache()
 
         obs = self._get_obs()
-        reward = self._compute_reward(action)
-        terminated = self._is_terminated()
+        reward, reward_terms = self._compute_reward(action)
+        self.diag_reward_step_count += 1
+        for key, value in reward_terms.items():
+            self.diag_reward_sums[key] += float(value)
+
+        terminated, term_reason, term_metrics = self._check_termination()
         truncated = self.n_steps >= self.max_steps
+        if terminated or truncated:
+            if terminated:
+                end_reason = term_reason
+            elif truncated:
+                end_reason = "timeout"
+            else:
+                end_reason = "other"
+            self._on_episode_end(
+                terminated=terminated,
+                truncated=truncated,
+                reason=end_reason,
+                term_metrics=term_metrics,
+            )
         self.last_action = action.copy()
 
         return obs, reward, terminated, truncated, {}
 
     def _sample_reset_phase(self) -> int:
+        phase_start, phase_end = self._phase_bounds()
+        if not self.adaptive_reset_enabled:
+            return int(self.np_random.integers(phase_start, phase_end))
+
+        should_use_uniform = (
+            self.completed_episodes < self.adaptive_reset_warmup_episodes
+            or self.adaptive_visit_counts.sum() < self.adaptive_reset_min_visits
+        )
+        if should_use_uniform:
+            return int(self.np_random.integers(phase_start, phase_end))
+
+        bin_probs = self._adaptive_bin_probabilities(phase_start, phase_end)
+        chosen_bin = int(self.np_random.choice(self.adaptive_reset_bins, p=bin_probs))
+        return self._sample_phase_from_bin(chosen_bin, phase_start, phase_end)
+
+    def _phase_bounds(self) -> tuple[int, int]:
         phase_start = int(self.reset_phase_start * len(self.motion))
         phase_end = max(phase_start + 1, int(self.reset_phase_end * len(self.motion)))
-        return int(self.np_random.integers(phase_start, phase_end))
+        phase_end = min(phase_end, len(self.motion))
+        return phase_start, phase_end
+
+    def _phase_to_bin(self, phase_idx: int) -> int:
+        idx = int(np.clip(phase_idx, 0, len(self.motion) - 1))
+        ratio = idx / max(len(self.motion), 1)
+        return int(np.clip(ratio * self.adaptive_reset_bins, 0, self.adaptive_reset_bins - 1))
+
+    def _sample_phase_from_bin(self, bin_idx: int, phase_start: int, phase_end: int) -> int:
+        bin_start = int(bin_idx * len(self.motion) / self.adaptive_reset_bins)
+        bin_end = int((bin_idx + 1) * len(self.motion) / self.adaptive_reset_bins)
+        sample_start = max(phase_start, bin_start)
+        sample_end = min(phase_end, max(bin_end, sample_start + 1))
+        if sample_end <= sample_start:
+            return int(self.np_random.integers(phase_start, phase_end))
+        return int(self.np_random.integers(sample_start, sample_end))
+
+    def _adaptive_bin_probabilities(self, phase_start: int, phase_end: int) -> np.ndarray:
+        failure_rate = (self.adaptive_fail_counts + 1e-4) / (
+            self.adaptive_visit_counts + 1e-4
+        )
+        failure_rate = np.power(failure_rate, self.adaptive_reset_power)
+
+        if self.adaptive_reset_smoothing > 1:
+            window = int(self.adaptive_reset_smoothing)
+            if window % 2 == 0:
+                window += 1
+            kernel = np.ones(window, dtype=np.float32) / window
+            failure_rate = np.convolve(failure_rate, kernel, mode="same")
+
+        allowed = np.zeros(self.adaptive_reset_bins, dtype=np.float32)
+        start_bin = self._phase_to_bin(phase_start)
+        end_bin = self._phase_to_bin(max(phase_start, phase_end - 1)) + 1
+        allowed[start_bin:end_bin] = 1.0
+
+        weighted = failure_rate * allowed
+        weighted_sum = weighted.sum()
+        if weighted_sum <= 1e-8:
+            weighted = allowed
+            weighted_sum = weighted.sum()
+
+        adaptive = weighted / max(weighted_sum, 1e-8)
+        uniform = allowed / max(allowed.sum(), 1e-8)
+        mix = float(np.clip(self.adaptive_reset_uniform_mix, 0.0, 1.0))
+        probs = mix * uniform + (1.0 - mix) * adaptive
+        probs /= max(probs.sum(), 1e-8)
+        return probs
+
+    def _on_episode_end(self, terminated: bool, truncated: bool, reason: str, term_metrics: dict):
+        self.completed_episodes += 1
+        terminal_bin = self._phase_to_bin(self.phase)
+        self.adaptive_visit_counts[terminal_bin] += 1.0
+        if terminated:
+            self.adaptive_fail_counts[terminal_bin] += 1.0
+
+        self.diag_episode_count += 1
+        self.diag_episode_len_sum += float(self.n_steps)
+        self.diag_terminal_bin_counts[terminal_bin] += 1.0
+        if terminated:
+            self.diag_terminated_count += 1
+        if truncated:
+            self.diag_truncated_count += 1
+        if reason not in self.diag_reason_counts:
+            reason = "other"
+        self.diag_reason_counts[reason] += 1
+
+        height_err = term_metrics.get("height_err", np.nan)
+        ori_err = term_metrics.get("ori_err", np.nan)
+        if np.isfinite(height_err):
+            self.diag_height_err_sum += float(height_err)
+            self.diag_height_err_count += 1
+        if np.isfinite(ori_err):
+            self.diag_ori_err_sum += float(ori_err)
+            self.diag_ori_err_count += 1
+
+        # Competence curriculum grows reset coverage based on achieved episode length.
+        if self.curriculum_mode == "competence":
+            ratio = float(np.clip(self.n_steps / max(self.max_steps, 1), 0.0, 1.0))
+            if not self.episode_len_ema_initialized:
+                self.episode_len_ema = ratio
+                self.episode_len_ema_initialized = True
+            else:
+                alpha = float(np.clip(self.competence_ema_alpha, 0.0, 0.9999))
+                self.episode_len_ema = alpha * self.episode_len_ema + (1.0 - alpha) * ratio
+
+            denom = max(self.competence_high - self.competence_low, 1e-6)
+            progress = (self.episode_len_ema - self.competence_low) / denom
+            self.update_curriculum(progress)
 
     def _apply_reference_targets(self, action: np.ndarray):
         ref_joint_pos = self.motion.get_qpos(self.phase)[7:]
@@ -335,9 +539,11 @@ class LocoMimicEnv(gym.Env):
 
         return np.concatenate(obs_parts).astype(np.float32)
 
-    def _compute_reward(self, action: np.ndarray) -> float:
+    def _compute_reward(self, action: np.ndarray) -> tuple[float, dict]:
         if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
-            return -100.0
+            terms = {k: 0.0 for k in self._diag_reward_keys}
+            terms["total_reward"] = -100.0
+            return -100.0, terms
 
         current = self.current_features
         ref = self._reference_to_dict(self.reference_features)
@@ -379,7 +585,20 @@ class LocoMimicEnv(gym.Env):
         )
         joint_limit_penalty = self.joint_limit_weight * self._joint_limit_violation()
 
-        return float(tracking_reward - action_rate_penalty - joint_limit_penalty)
+        total_reward = float(tracking_reward - action_rate_penalty - joint_limit_penalty)
+        terms = {
+            "tracking_reward": float(tracking_reward),
+            "r_pose": float(r_pose),
+            "r_vel": float(r_vel),
+            "r_root": float(r_root),
+            "r_root_vel": float(r_root_vel),
+            "r_eff": float(r_eff),
+            "contact_reward": float(contact_reward),
+            "action_rate_penalty": float(action_rate_penalty),
+            "joint_limit_penalty": float(joint_limit_penalty),
+            "total_reward": total_reward,
+        }
+        return total_reward, terms
 
     def _joint_limit_violation(self) -> float:
         joint_pos = self.data.qpos[7:]
@@ -389,14 +608,14 @@ class LocoMimicEnv(gym.Env):
         above = np.clip(joint_pos - upper, 0.0, None)
         return float(np.mean(below + above))
 
-    def _is_terminated(self) -> bool:
+    def _check_termination(self) -> tuple[bool, str, dict]:
         if np.isnan(self.data.qpos).any() or np.isnan(self.data.qvel).any():
-            return True
+            return True, "nan", {"height_err": np.nan, "ori_err": np.nan}
 
         ref_qpos = self.motion.get_qpos(self.phase)
         height_err = abs(self.data.qpos[2] - ref_qpos[2])
         if self.data.qpos[2] < self.min_root_height or height_err > self.height_threshold:
-            return True
+            return True, "height", {"height_err": float(height_err), "ori_err": np.nan}
 
         ref_rot = self._quat_to_rotmat(ref_qpos[3:7])
         root_rot = self.current_features["root_rot_world"]
@@ -404,9 +623,13 @@ class LocoMimicEnv(gym.Env):
         cos_angle = np.clip((np.trace(rel_rot) - 1.0) / 2.0, -1.0, 1.0)
         ori_err = np.arccos(cos_angle)
         if ori_err > self.ori_threshold:
-            return True
+            return True, "orientation", {"height_err": float(height_err), "ori_err": float(ori_err)}
 
-        return False
+        return False, "none", {"height_err": float(height_err), "ori_err": float(ori_err)}
+
+    def _is_terminated(self) -> bool:
+        terminated, _, _ = self._check_termination()
+        return terminated
 
     @staticmethod
     def _quat_to_rotmat(quat_wxyz: np.ndarray) -> np.ndarray:

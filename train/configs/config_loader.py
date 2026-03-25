@@ -65,9 +65,19 @@ class PPOConfig:
     initial_ori_threshold: float = 1.5
     ori_threshold: float = 0.8
     min_root_height: float = 0.45
-    curriculum_mode: str = "off"  # off | linear
+    curriculum_mode: str = "off"  # off | linear | competence
     final_reset_phase_end: float = 1.0
     curriculum_update_freq: int = 100000
+    competence_ema_alpha: float = 0.98
+    competence_low: float = 0.10
+    competence_high: float = 0.80
+    adaptive_reset_enabled: bool = False
+    adaptive_reset_bins: int = 80
+    adaptive_reset_warmup_episodes: int = 500
+    adaptive_reset_uniform_mix: float = 0.30
+    adaptive_reset_smoothing: int = 9
+    adaptive_reset_power: float = 1.5
+    adaptive_reset_min_visits: float = 5.0
     contact_height_threshold: float = 0.06
     contact_vel_threshold: float = 0.35
     pose_reward_weight: float = 0.40
@@ -84,7 +94,7 @@ class PPOConfig:
     action_rate_weight: float = 0.01
     joint_limit_weight: float = 2.0
     residual_reg_coef: float = 0.0
-    target_kl: float = 0.0
+    target_kl: float = 0.01
     eval_deterministic_default: bool = True
     device: str = 'cpu'
 

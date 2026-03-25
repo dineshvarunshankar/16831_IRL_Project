@@ -13,6 +13,18 @@ parser.add_argument('--episodes', type=int, default=100)
 parser.add_argument('--render', action='store_true')
 parser.add_argument('--deterministic', action='store_true', help='Force deterministic (mean) actions')
 parser.add_argument('--stochastic', action='store_true', help='Force stochastic action sampling')
+parser.add_argument(
+    '--reset-phase-start',
+    type=float,
+    default=None,
+    help='Override reset phase start in [0, 1].',
+)
+parser.add_argument(
+    '--reset-phase-end',
+    type=float,
+    default=None,
+    help='Override reset phase end in [0, 1].',
+)
 args = parser.parse_args()
 
 if args.algo == 'ppo':
@@ -21,6 +33,13 @@ if args.algo == 'ppo':
 else:
     config_path = args.config if args.config else 'train/configs/sac_config.yaml'
     config = load_config(config_path)
+
+if args.algo == 'ppo':
+    if args.reset_phase_start is not None:
+        config.reset_phase_start = float(args.reset_phase_start)
+    if args.reset_phase_end is not None:
+        config.reset_phase_end = float(args.reset_phase_end)
+
 env = LocoMimicEnv(
     config.motion_path,
     config=config if args.algo == 'ppo' else None,
@@ -50,6 +69,12 @@ elif args.stochastic:
     deterministic_eval = False
 else:
     deterministic_eval = deterministic_default
+
+if args.algo == 'ppo':
+    print(
+        f"Eval reset phase range: [{config.reset_phase_start:.3f}, {config.reset_phase_end:.3f}]"
+    )
+print(f"Deterministic eval: {deterministic_eval}")
 
 episode_returns = []
 episode_lengths = []
