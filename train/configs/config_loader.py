@@ -36,6 +36,18 @@ class PPOConfig:
     log_freq          : int
     save_freq         : int
     n_envs            : int = 1
+    action_scale      : float = 0.1
+    reset_joint_noise : float = 0.0
+    reset_vel_noise   : float = 0.0
+    term_height_threshold: float = 0.4
+    term_orientation_threshold: float = 1.2
+    init_log_std      : float = -2.5
+    lr_anneal         : bool = True
+    seed              : int = 42
+    target_kl         : float = 0.01
+    vector_env_type   : str = "async"   # async | sync
+    vector_env_context: str = "spawn"   # spawn | fork | forkserver
+    torch_num_threads : int = 1
     device            : str = 'cpu'
 
 def _auto_device(cfg):

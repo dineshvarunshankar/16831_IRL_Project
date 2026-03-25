@@ -132,13 +132,22 @@ def main():
     if args.algo == 'ppo':
         config_path = args.config if args.config else 'train/configs/ppo_config.yaml'
         config = load_ppo_config(config_path)
-        agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
     else:
         config_path = args.config if args.config else 'train/configs/sac_config.yaml'
         config = load_config(config_path)
-        agent = SACAgent(obs_dim=139, act_dim=29, config=config)
 
-    env = LocoMimicEnv(config.motion_path, render_mode='human' if args.render else None)
+    env = LocoMimicEnv(
+        config.motion_path,
+        config=config,
+        render_mode='human' if args.render else None,
+    )
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0]
+
+    if args.algo == 'ppo':
+        agent = PPOAgent(obs_dim=obs_dim, act_dim=act_dim, config=config)
+    else:
+        agent = SACAgent(obs_dim=obs_dim, act_dim=act_dim, config=config)
     agent.load(args.checkpoint)
 
     print(f'Evaluating {args.algo}...')

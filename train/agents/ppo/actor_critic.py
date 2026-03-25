@@ -17,7 +17,7 @@ def orthogonal_init(module, gain=np.sqrt(2)):
 
 
 class Actor(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dim=512):
+    def __init__(self, obs_dim, act_dim, hidden_dim=512, init_log_std=-2.5):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
@@ -28,7 +28,7 @@ class Actor(nn.Module):
         self.mean_head = nn.Linear(hidden_dim, act_dim)
 
         # learnable log_std (state-independent)
-        self.log_std = nn.Parameter(torch.zeros(act_dim))
+        self.log_std = nn.Parameter(torch.full((act_dim,), float(init_log_std)))
 
         # orthogonal init
         self.net.apply(orthogonal_init)
@@ -60,8 +60,8 @@ class Actor(nn.Module):
         u = torch.atanh(action_clipped)
 
         log_prob = dist.log_prob(u)
-        # correction for tanh squashing
-        log_prob -= torch.log(1 - action.pow(2) + 1e-6)
+        # correction for tanh squashing; use clipped action consistently.
+        log_prob -= torch.log(1 - action_clipped.pow(2) + 1e-6)
         return log_prob.sum(dim=-1, keepdim=True)
 
     def sample(self, state):

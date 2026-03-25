@@ -29,19 +29,23 @@ def main():
     parser.add_argument('--height', type=int, default=480)
     args = parser.parse_args()
 
-    # load agent
     if args.algo == 'ppo':
         config_path = args.config or 'train/configs/ppo_config.yaml'
         config = load_ppo_config(config_path)
-        agent = PPOAgent(obs_dim=139, act_dim=29, config=config)
     else:
         config_path = args.config or 'train/configs/sac_config.yaml'
         config = load_config(config_path)
-        agent = SACAgent(obs_dim=139, act_dim=29, config=config)
+
+    env = LocoMimicEnv(config.motion_path, config=config)
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0]
+
+    if args.algo == 'ppo':
+        agent = PPOAgent(obs_dim=obs_dim, act_dim=act_dim, config=config)
+    else:
+        agent = SACAgent(obs_dim=obs_dim, act_dim=act_dim, config=config)
 
     agent.load(args.checkpoint)
-
-    env = LocoMimicEnv(config.motion_path)
 
     # two renderers: one for policy, one for reference
     policy_renderer = mujoco.Renderer(env.model, height=args.height, width=args.width)

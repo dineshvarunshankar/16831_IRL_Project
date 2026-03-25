@@ -30,7 +30,7 @@ import time
 G1_XML = "mujoco_menagerie/unitree_g1/scene.xml"
 
 class LocoMimicEnv(gym.Env):
-    def __init__(self, motion_clip_path, render_mode=None):
+    def __init__(self, motion_clip_path, config=None, render_mode=None):
 
         """
         Sets up the simulation environment, robot model, reference motion,
@@ -59,7 +59,13 @@ class LocoMimicEnv(gym.Env):
         self.kp = np.full(self.model.nu, 500.0)
         self.kd = 2.0 * np.sqrt(self.kp)
 
-        self.action_scale = 0.5
+        self.action_scale = float(getattr(config, "action_scale", 0.5))
+        self.reset_joint_noise = float(getattr(config, "reset_joint_noise", 0.01))
+        self.reset_vel_noise = float(getattr(config, "reset_vel_noise", 0.01))
+        self.term_height_threshold = float(getattr(config, "term_height_threshold", 0.25))
+        self.term_orientation_threshold = float(
+            getattr(config, "term_orientation_threshold", 0.8)
+        )
 
         # action space
 
@@ -128,15 +134,15 @@ class LocoMimicEnv(gym.Env):
         super().reset(seed=seed)
 
         # initialize phase at random points from the motion clip
-        self.phase = np.random.randint(0, len(self.motion)) # will following any other dist help for long horizon? idk
+        self.phase = int(self.np_random.integers(0, len(self.motion)))
 
         # set the mujoco model to ref pose from the motion clip at sampled phase 
         self.data.qpos[:] = self.motion.get_qpos(self.phase) 
         self.data.qvel[:] = self.motion.get_qvel(self.phase)
 
         # random perturbation for robustness
-        self.data.qpos[7:] += np.random.normal(0, 0.01, self.model.nu)
-        self.data.qvel[6:] += np.random.normal(0, 0.01, self.model.nu)
+        self.data.qpos[7:] += self.np_random.normal(0.0, self.reset_joint_noise, self.model.nu)
+        self.data.qvel[6:] += self.np_random.normal(0.0, self.reset_vel_noise, self.model.nu)
 
         # update all body positions
         mujoco.mj_forward(self.model, self.data)
@@ -287,14 +293,14 @@ class LocoMimicEnv(gym.Env):
 
         # condition 1: height deviation from reference
         height_err = abs(self.data.qpos[2] - ref_qpos[2])
-        if height_err > 0.25:
+        if height_err > self.term_height_threshold:
             return True
 
         # condition 2: root orientation too far from reference
         ref_quat   = ref_qpos[3:7]
         robot_quat = self.data.qpos[3:7]
         dot = np.abs(np.dot(robot_quat, ref_quat))
-        if dot < np.cos(0.8 / 2):
+        if dot < np.cos(self.term_orientation_threshold / 2):
             return True
 
         return False

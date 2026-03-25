@@ -31,7 +31,7 @@ def train():
         config=config.__dict__
     )
 
-    env = LocoMimicEnv(config.motion_path)
+    env = LocoMimicEnv(config.motion_path, config=config)
     agent = SACAgent(obs_dim=139, act_dim=29, config=config)
 
     if args.load:

@@ -1,24 +1,26 @@
 # Data and models
-data/
-models/
-logs/
-videos/
+/data/
+/models/
+/logs/
+/videos/
+/results/plots/
 
-# External repos
-mujoco_menagerie/
-unitree_mujoco/
+# External repos (kept local)
+/mujoco_menagerie/
+/unitree_mujoco/
 
-# wandb
-wandb/
+# Experiment artifacts
+/wandb/
+/MUJOCO_LOG.TXT
 
 # Python
-__pycache__/
-*.pyc
-*.pyo
+**/__pycache__/
+*.py[cod]
 *.egg-info/
 .eggs/
 dist/
 build/
+.pytest_cache/
 
 # Environments
 .env
