@@ -1,7 +1,7 @@
 import re
 import matplotlib.pyplot as plt
 
-LOG_PATH = "logs/sac_2m.log"
+LOG_PATH = "/home/dtc/Downloads/output_sac.log"
 
 pattern = re.compile(r"Step\s+(\d+).+Avg100 R=\s*([-+]?\d*\.?\d+)")
 

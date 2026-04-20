@@ -98,10 +98,11 @@ def main() -> None:
 
     ppo_steps, ppo_returns = parse_training_log(args.ppo_log)
     sac_steps, sac_returns = parse_training_log(args.sac_log)
-    sac_max_step = sac_steps.max()
+    
+    """sac_max_step = sac_steps.max()
     ppo_mask = ppo_steps <= sac_max_step
     ppo_steps = ppo_steps[ppo_mask]
-    ppo_returns = ppo_returns[ppo_mask]
+    ppo_returns = ppo_returns[ppo_mask]"""
 
     random_mean = load_random_mean(args.random_npy, args.random_log)
 
@@ -125,8 +126,8 @@ def main() -> None:
     )
 
     ax = plt.gca()
-    ax.set_xlim(0, sac_max_step)
-    ax.set_xticks(np.linspace(0, sac_max_step, 5))
+    #ax.set_xlim(0, sac_max_step)
+    #ax.set_xticks(np.linspace(0, sac_max_step, 5))
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x / 1e6:.1f}"))
 
 

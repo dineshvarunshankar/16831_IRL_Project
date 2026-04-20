@@ -2,7 +2,7 @@
 /data/
 /models/
 /logs/
-/videos/
+results/videos/
 /results/plots/
 
 # External repos (kept local)
