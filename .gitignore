@@ -9,7 +9,7 @@ unitree_rl_mjlab
 /MUJOCO_LOG.TXT
 
 # Python
-**/__pycache__/
+__pycache__
 *.py[cod]
 *.egg-info/
 .eggs/

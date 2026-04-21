@@ -17,7 +17,7 @@ cd unitree_rl_mjlab
 pip install -e .
 cd ..
 
-# Install dependencies
+# Install dependencies (redundancies from submodule to be cleaned - TODO)
 pip install -r requirements.txt
 ```
 
