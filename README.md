@@ -5,6 +5,10 @@ RL algorithms (PPO, SAC, TDMPC2) with [Unitree RL mjlab](https://github.com/unit
 ## Setup
 
 ```bash
+
+#create conda environment
+conda create -n locomimic python=3.10
+conda activate locomimic
 # Initialize submodules
 git submodule update --init --recursive
 
