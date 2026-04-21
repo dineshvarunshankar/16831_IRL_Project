@@ -1,11 +1,6 @@
-# Data and models
-/data/
-/models/
-/logs/
-results/videos/
-/results/plots/
 
-# External repos (kept local)
+# submodules
+unitree_rl_mjlab
 /mujoco_menagerie/
 /unitree_mujoco/
 
