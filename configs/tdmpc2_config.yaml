@@ -1,0 +1,49 @@
+# TDMPC2 Configuration Template
+
+algorithm:
+  name: "tdmpc2"
+  
+  # Network architecture
+  latent_dim: 512
+  hidden_dims: [512, 512]
+  activation: "elu"
+  
+  # TDMPC2 hyperparameters
+  learning_rate: 1.0e-4
+  gamma: 0.99
+  
+  # World model
+  horizon: 5  # Planning horizon
+  num_samples: 512  # CEM samples
+  num_elites: 64  # CEM elites
+  num_iterations: 6  # CEM iterations
+  temperature: 0.5  # CEM temperature
+  
+  # Replay buffer
+  buffer_size: 1_000_000
+  batch_size: 256
+  
+  # Training settings
+  learning_starts: 10000
+  update_freq: 1
+  gradient_steps: 1
+  
+  # Device
+  device: "cuda"
+
+environment:
+  task_id: "Unitree-G1-Tracking-No-State-Estimation"
+  num_envs: 4096
+  motion_file: null  # Set via command line
+
+training:
+  total_steps: 10_000_000
+  save_interval: 1000
+  log_interval: 10
+  eval_interval: 1000
+  eval_episodes: 10
+  
+  # WandB logging
+  wandb_project: "unitree-rl-integration"
+  wandb_entity: null
+  experiment_name: "tdmpc2_g1_tracking"

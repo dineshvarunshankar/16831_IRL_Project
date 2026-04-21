@@ -1,3 +1,16 @@
-numpy>=1.26.4
-mujoco>=3.5.0
-imageio>=2.34.0
+# Core
+numpy
+torch
+pyyaml
+
+# Logging
+wandb
+tensorboard
+
+# Utilities
+tqdm
+imageio
+matplotlib
+
+# Unitree RL mjlab dependencies (installed via submodule)
+# cd unitree_rl_mjlab && pip install -e .

@@ -1,0 +1,42 @@
+# PPO Configuration Template
+
+algorithm:
+  name: "ppo"
+  
+  # Network architecture
+  hidden_dims: [256, 256, 256]
+  activation: "elu"
+  
+  # PPO hyperparameters
+  learning_rate: 3.0e-4
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_param: 0.2
+  value_loss_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+  
+  # Training settings
+  num_epochs: 10
+  num_mini_batches: 4
+  rollout_length: 24  # Steps per rollout
+  
+  # Device
+  device: "cuda"
+
+environment:
+  task_id: "Unitree-G1-Tracking-No-State-Estimation"
+  num_envs: 4096
+  motion_file: null  # Set via command line
+
+training:
+  total_steps: 10_000_000
+  save_interval: 1000
+  log_interval: 10
+  eval_interval: 1000
+  eval_episodes: 10
+  
+  # WandB logging
+  wandb_project: "unitree-rl-integration"
+  wandb_entity: null
+  experiment_name: "ppo_g1_tracking"

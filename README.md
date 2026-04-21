@@ -1,69 +1,104 @@
 # LocoMimic
 
-This repository contains tools for simulating, visualizing, and training retargeted human motion on the Unitree G1 humanoid robot using MuJoCo and Gymnasium. 
+RL algorithms (PPO, SAC, TDMPC2) with [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) for G1 humanoid motion imitation.
 
 ## Setup
 
-1. **Conda Environment**:
 ```bash
-conda create -n roblearn python=3.10
-conda activate roblearn
-```
+# Initialize submodules
+git submodule update --init --recursive
 
-### 2. Install PyTorch
-Install PyTorch manually based on your platform before anything else:
-```bash
-# Linux with NVIDIA GPU (CUDA 12.x)
-pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+# Install Unitree RL mjlab
+cd unitree_rl_mjlab
+pip install -e .
+cd ..
 
-# Mac M-series
-pip install torch==2.1.0
-
-# CPU only
-pip install torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
-```
-
-### 3. Install Dependencies
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 4. External Dependencies
-These are not committed to the repo — clone them separately:
-```bash
-git clone https://github.com/google-deepmind/mujoco_menagerie
-git clone https://github.com/unitreerobotics/unitree_mujoco
+## Project Structure
+
+```
+.
+├── unitree_rl_mjlab/          # Submodule: Unitree's framework
+├── algorithms/                 # Custom RL algorithms (TODO: implement)
+│   ├── base.py                # Common interface
+│   ├── ppo/                   # PPO
+│   ├── sac/                   # SAC
+│   └── tdmpc2/                # TDMPC2
+├── configs/                    # Algorithm configs
+├── scripts/                    # Training & evaluation scripts
+│   ├── train/                 # Training scripts (TODO: implement)
+│   ├── test/                  # Testing scripts (TODO: implement)
+│   └── train(old-reference)/  # Old training code (reference only)
+├── utils/                      # Utility scripts (convert, play, visualize)
+├── data/lafan1_retargeted/    # Motion data (CSV)
+├── logs/                       # Training logs
+├── models/                     # Saved checkpoints
+└── results/                    # Evaluation results
 ```
 
 ## Usage
 
-### Motion Visualization
+### Convert Motion Data
+
 ```bash
-python visualize.py
-python visualize.py --csv data/lafan1_retargeted/g1/walk1_subject1.csv --speed 0.5
-python visualize.py --list
+python utils/convert_motions.py
 ```
 
-### Training
+### Train with Unitree Baseline
+
 ```bash
-# SAC
-PYTHONPATH=. python -m train.train
-
-# Random baseline
-PYTHONPATH=. python scripts/random_baseline.py
+cd unitree_rl_mjlab
+python scripts/train.py Unitree-G1-Tracking-No-State-Estimation \
+  --motion-file ../data/motions_npz/walk1.npz \
+  --env.scene.num-envs 4096
 ```
 
-### Project Structure
+### Train Custom Algorithms (TODO)
+
+```bash
+python scripts/train_sac.py --motion-file data/motions_npz/walk1.npz
+python scripts/train_ppo.py --motion-file data/motions_npz/walk1.npz
+python scripts/train_tdmpc2.py --motion-file data/motions_npz/walk1.npz
 ```
-env/
-  motion_clip.py      — loads reference motion from CSV
-  locomimic_env.py    — Gymnasium environment for motion imitation
-train/
-  agents/
-    sac/              — SAC implementation from scratch
-  configs/            — YAML hyperparameter configs
-  train.py            — main training loop with wandb logging
-scripts/
-  random_baseline.py  — random agent evaluation
-visualize.py          — motion visualization
+
+## Implementation Guide
+
+All algorithms implement `BaseAlgorithm` in `algorithms/base.py`:
+
+```python
+class BaseAlgorithm(ABC):
+    def select_action(self, obs: torch.Tensor, deterministic: bool) -> torch.Tensor:
+        """obs: [num_envs, obs_dim] -> actions: [num_envs, act_dim]"""
+        pass
+    
+    def update(self, obs, actions, rewards, next_obs, dones) -> Dict[str, float]:
+        """Update from batched transitions"""
+        pass
+    
+    def save(self, path: str):
+        pass
+    
+    def load(self, path: str):
+        pass
+```
+
+Integration with Unitree RL mjlab:
+
+```python
+from mjlab.envs import ManagerBasedRlEnv
+from mjlab.rl import RslRlVecEnvWrapper
+from mjlab.tasks.registry import load_env_cfg
+
+env_cfg = load_env_cfg("Unitree-G1-Tracking-No-State-Estimation")
+env_cfg.commands["motion"].motion_file = "path/to/motion.npz"
+
+env = ManagerBasedRlEnv(cfg=env_cfg, device="cuda")
+env = RslRlVecEnvWrapper(env, clip_actions=True)
+
+obs = env.reset()  # [num_envs, obs_dim]
+actions = agent.select_action(obs)
+obs_next, rewards, dones, infos = env.step(actions)
 ```

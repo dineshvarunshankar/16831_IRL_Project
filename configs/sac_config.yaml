@@ -1,0 +1,45 @@
+# SAC Configuration Template
+
+algorithm:
+  name: "sac"
+  
+  # Network architecture
+  hidden_dims: [256, 256]
+  activation: "relu"
+  
+  # SAC hyperparameters
+  learning_rate: 3.0e-4
+  gamma: 0.99
+  tau: 0.005  # Target network update rate
+  alpha: 0.2  # Entropy coefficient
+  auto_alpha: true  # Automatic entropy tuning
+  target_entropy: null  # Auto-computed if null
+  
+  # Replay buffer
+  buffer_size: 1_000_000
+  batch_size: 256
+  
+  # Training settings
+  learning_starts: 10000
+  update_freq: 1
+  gradient_steps: 1
+  
+  # Device
+  device: "cuda"
+
+environment:
+  task_id: "Unitree-G1-Tracking-No-State-Estimation"
+  num_envs: 4096
+  motion_file: null  # Set via command line
+
+training:
+  total_steps: 10_000_000
+  save_interval: 1000
+  log_interval: 10
+  eval_interval: 1000
+  eval_episodes: 10
+  
+  # WandB logging
+  wandb_project: "unitree-rl-integration"
+  wandb_entity: null
+  experiment_name: "sac_g1_tracking"
