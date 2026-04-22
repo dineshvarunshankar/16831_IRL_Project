@@ -1,7 +1,9 @@
 import argparse
+import time
 import torch
 import wandb
 import os
+from collections import deque
 from datetime import datetime
 
 import mjlab.tasks
@@ -23,11 +25,21 @@ def train():
     parser.add_argument('--load',   type=str, default=None)
     parser.add_argument('--num_envs', type=int, default=4096)
     parser.add_argument('--task',   type=str, default='Unitree-G1-Tracking')
+    parser.add_argument('--fast-sac', action='store_true')
+    parser.add_argument("--iter", type=int,
+    help="override config.num_learning_iterations; used for smoke tests"
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
     config.num_envs = args.num_envs
-    config.device   = 'cuda:0'
+
+    if args.iter is not None:
+        config.num_learning_iterations = args.iter
+
+    if args.fast_sac:
+        config.use_layer_norm = True
+        config.use_mean_q = True
 
     # --- EXPERIMENT SETUP ---
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -38,7 +50,7 @@ def train():
     os.makedirs(run_log_dir,   exist_ok=True)
 
     wandb.init(
-        project='locomimic',
+        project=config.wandb_project,
         name=run_name,
         config=config.__dict__
     )
@@ -54,7 +66,7 @@ def train():
 
     env_cfg.auto_reset     = False
     env_cfg.scene.num_envs = args.num_envs
-    env_cfg.seed           = 42
+    env_cfg.seed           = config.seed
 
     env = ManagerBasedRlEnv(cfg=env_cfg, device=config.device)
     env = SACVecEnvWrapper(env)
@@ -78,7 +90,7 @@ def train():
     print(f'Run    : {run_name}')
     print(f'Device : {config.device}')
     print(f'Envs   : {args.num_envs}')
-    print(f'Steps  : {config.total_steps}')
+    print(f'Iters  : {config.num_learning_iterations}')
 
     # --- INIT STATE ---
     actor_obs, critic_obs, _ = env.reset()
@@ -87,17 +99,19 @@ def train():
     episode_steps   = torch.zeros(args.num_envs, device=config.device)
     episode_num     = 0
 
-    recent_returns = []
-    recent_lengths = []
+    recent_returns = deque(maxlen=config.ep_stats_window)
+    recent_lengths = deque(maxlen=config.ep_stats_window)
 
-    ckpt_steps = {
-        int(config.total_steps * 0.25),
-        int(config.total_steps * 0.50),
-        int(config.total_steps * 0.75),
-    }
+    # rolling per-step reward stats since last log
+    reward_sum   = torch.zeros((), device=config.device)
+    reward_sqsum = torch.zeros((), device=config.device)
+    reward_count = 0
+    last_log_time = time.time()
+
+    ckpt_steps = {int(config.num_learning_iterations * f) for f in config.ckpt_fractions}
 
     # --- TRAINING LOOP ---
-    for step in range(config.total_steps):
+    for step in range(config.num_learning_iterations):
 
         # select action
         if step < config.learning_starts:
@@ -123,15 +137,21 @@ def train():
         episode_returns += reward
         episode_steps   += 1
 
+        # rolling reward stats (on-device, no sync)
+        reward_sum   += reward.sum()
+        reward_sqsum += (reward * reward).sum()
+        reward_count += reward.numel()
+
         # handle done envs
         done_any = terminated | time_outs
         if done_any.any():
             finished = done_any.nonzero(as_tuple=False).squeeze(-1)
 
-            for i in finished:
-                recent_returns.append(episode_returns[i].item())
-                recent_lengths.append(episode_steps[i].item())
-                episode_num += 1
+            returns_cpu = episode_returns[finished].cpu().tolist()
+            lengths_cpu = episode_steps[finished].cpu().tolist()
+            recent_returns.extend(returns_cpu)
+            recent_lengths.extend(lengths_cpu)
+            episode_num += len(returns_cpu)
 
             episode_returns[finished] = 0.0
             episode_steps[finished]   = 0.0
@@ -150,26 +170,48 @@ def train():
         critic_obs = next_critic_obs
 
         # logging
-        if step % config.log_freq == 0 and len(recent_returns) > 0:
-            avg_r = sum(recent_returns[-100:]) / min(len(recent_returns), 100)
-            avg_l = sum(recent_lengths[-100:]) / min(len(recent_lengths), 100)
+        if step % config.log_freq == 0 and step > 0:
+            now = time.time()
+            dt = max(now - last_log_time, 1e-6)
+            last_log_time = now
 
             log_data = {
-                'episode/avg_return': avg_r,
-                'episode/avg_steps':  avg_l,
-                'episode/num':        episode_num,
-                'env_step':           step,
+                'env_step':            step,
+                'env/transitions':     step * args.num_envs,
+                'buffer/size':         len(agent.buffer),
+                'perf/iters_per_sec':  config.log_freq / dt,
+                'perf/env_steps_per_sec': config.log_freq * args.num_envs / dt,
             }
 
-            if step >= config.learning_starts:
-                log_data['agent/alpha']     = agent.log_alpha.exp().item()
-                log_data['agent/log_alpha'] = agent.log_alpha.item()
+            # reward stats (one sync for the whole block)
+            if reward_count > 0:
+                r_mean = (reward_sum / reward_count).item()
+                r_var  = (reward_sqsum / reward_count).item() - r_mean * r_mean
+                log_data['env/reward_mean'] = r_mean
+                log_data['env/reward_std']  = max(r_var, 0.0) ** 0.5
+                reward_sum.zero_(); reward_sqsum.zero_(); reward_count = 0
+
+            # episode stats
+            if len(recent_returns) > 0:
+                log_data['episode/avg_return'] = sum(recent_returns) / len(recent_returns)
+                log_data['episode/avg_steps']  = sum(recent_lengths) / len(recent_lengths)
+                log_data['episode/num']        = episode_num
+
+            # agent training metrics
+            log_data.update(agent.pop_metrics())
+            log_data['policy/target_entropy'] = agent.target_entropy
 
             wandb.log(log_data, step=step)
 
+            avg_r = log_data.get('episode/avg_return', float('nan'))
+            avg_l = log_data.get('episode/avg_steps',  float('nan'))
+            qf    = log_data.get('loss/critic', float('nan'))
+            al    = log_data.get('alpha/value', float('nan'))
+            fps   = log_data['perf/env_steps_per_sec']
             print(f'Step {step:7d} | Ep {episode_num:5d} | '
-                  f'Avg100 R={avg_r:7.2f} L={avg_l:5.1f} | '
-                  f'α={agent.log_alpha.exp().item():.4f}')
+                  f'R={avg_r:7.2f} L={avg_l:5.1f} | '
+                  f'qf={qf:.3f} α={al:.4f} | '
+                  f'{fps:.0f} env-steps/s')
 
         # checkpointing
         if step in ckpt_steps:

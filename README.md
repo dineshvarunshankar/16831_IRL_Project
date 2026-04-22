@@ -1,104 +1,141 @@
 # LocoMimic
 
-RL algorithms (PPO, SAC, TDMPC2) with [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) for G1 humanoid motion imitation.
-
-## Setup
+## Setup (Linux, CUDA)
 
 ```bash
-# Initialize submodules
-git submodule update --init --recursive
+# 1. Clone
+git clone --recurse-submodules <repo-url>
+cd 16831_IRL_Project
 
-# Install Unitree RL mjlab
-cd unitree_rl_mjlab
-pip install -e .
-cd ..
+# 2. Create env
+conda create -n mjlab python=3.10 -y
+conda activate mjlab
 
-# Install dependencies
-pip install -r requirements.txt
+# 3. One-shot install
+bash setup.sh
+wandb login
 ```
+
+`setup.sh` runs: submodule init → `pip install -e unitree_rl_mjlab` → `pip install wandb` → CUDA sanity check.
 
 ## Project Structure
 
 ```
 .
-├── unitree_rl_mjlab/          # Submodule: Unitree's framework
-├── algorithms/                 # Custom RL algorithms (TODO: implement)
-│   ├── base.py                # Common interface
-│   ├── ppo/                   # PPO
-│   ├── sac/                   # SAC
-│   └── tdmpc2/                # TDMPC2
-├── configs/                    # Algorithm configs
-├── scripts/                    # Training & evaluation scripts
-│   ├── train/                 # Training scripts (TODO: implement)
-│   ├── test/                  # Testing scripts (TODO: implement)
-│   └── train(old-reference)/  # Old training code (reference only)
-├── utils/                      # Utility scripts (convert, play, visualize)
-├── data/lafan1_retargeted/    # Motion data (CSV)
-├── logs/                       # Training logs
-├── models/                     # Saved checkpoints
-└── results/                    # Evaluation results
+├── unitree_rl_mjlab/          # Submodule: mjlab framework
+├── agents/
+│   ├── base.py               
+│   ├── configs/
+│   │   ├── sac_config.yaml
+│   │   └── config_loader.py
+│   └── sac/
+│       ├── actor.py
+│       ├── critic.py
+│       ├── replay_buffer.py  
+│       └── sac_agent.py
+├── rl/
+│   └── sac_env_wrapper.py     # vec-env wrapper for mjlab
+├── scripts/train/
+│   └── train_sac.py           # entry point
+├── data/lafan1_retargeted/    # LAFAN1 motion CSVs
+├── logs/                      # wandb + stdout logs
+└── models/                    # saved checkpoints
 ```
 
-## Usage
+## Motion data: CSV -> NPZ
 
-### Convert Motion Data
+mjlab's motion-tracking env consumes `.npz` motion files. LAFAN1 ships as CSV, so convert once before training.
 
 ```bash
-python utils/convert_motions.py
+
+python unitree_rl_mjlab/scripts/csv_to_npz.py \
+  --robot g1 \
+  --input-file data/lafan1_retargeted/g1/walk1_subject1.csv \
+  --output-name walk1_subject1.npz \
+  --device cuda:0
 ```
 
-### Train with Unitree Baseline
+Notes:
+- `input_fps=30` (LAFAN1) and `output_fps=50` (mjlab G1 policy rate) are correct defaults — don't change unless you know why.
+- The output path is hardcoded to `./src/assets/motions/g1/`. Either pass a plain filename (as above) and update `motion_path` in the config to match, or edit `output_dir` inside `csv_to_npz.py`.
+- After conversion, set `motion_path` in `agents/configs/sac_config.yaml` to point at the generated `.npz`.
 
+## Train SAC
+
+### Smoke test (5 minutes)
 ```bash
-cd unitree_rl_mjlab
-python scripts/train.py Unitree-G1-Tracking-No-State-Estimation \
-  --motion-file ../data/motions_npz/walk1.npz \
-  --env.scene.num-envs 4096
+python scripts/train/train_sac.py \
+  --name smoketest \
+  --num_envs 256 \
+  --iter 500
 ```
 
-### Train Custom Algorithms (TODO)
+Check: stdout prints log lines, wandb run opens, no NaNs in `loss/critic` or `q/max`, `buffer/size` grows, `perf/env_steps_per_sec` > 0.
 
+### Full run (vanilla SAC)
 ```bash
-python scripts/train_sac.py --motion-file data/motions_npz/walk1.npz
-python scripts/train_ppo.py --motion-file data/motions_npz/walk1.npz
-python scripts/train_tdmpc2.py --motion-file data/motions_npz/walk1.npz
+python scripts/train/train_sac.py \
+  --name sac_vanilla \
+  --num_envs 4096
 ```
 
-## Implementation Guide
-
-All algorithms implement `BaseAlgorithm` in `algorithms/base.py`:
-
-```python
-class BaseAlgorithm(ABC):
-    def select_action(self, obs: torch.Tensor, deterministic: bool) -> torch.Tensor:
-        """obs: [num_envs, obs_dim] -> actions: [num_envs, act_dim]"""
-        pass
-    
-    def update(self, obs, actions, rewards, next_obs, dones) -> Dict[str, float]:
-        """Update from batched transitions"""
-        pass
-    
-    def save(self, path: str):
-        pass
-    
-    def load(self, path: str):
-        pass
+### Full run (FastSAC-style: LayerNorm + mean-of-Qs)
+```bash
+python scripts/train/train_sac.py \
+  --name sac_fast \
+  --num_envs 4096 \
+  --fast-sac
 ```
 
-Integration with Unitree RL mjlab:
+### CLI flags
+| Flag | Default | Description |
+|---|---|---|
+| `--name` | timestamp | run name (also wandb name) |
+| `--config` | `agents/configs/sac_config.yaml` | config file |
+| `--num_envs` | 4096 | parallel envs |
+| `--task` | `Unitree-G1-Tracking` | mjlab task id |
+| `--load` | None | checkpoint path to resume from |
+| `--fast-sac` | off | enables `use_layer_norm=True` + `use_mean_q=True` |
+| `--iter` | (config value) | override `num_learning_iterations` (for smoke tests) |
 
-```python
-from mjlab.envs import ManagerBasedRlEnv
-from mjlab.rl import RslRlVecEnvWrapper
-from mjlab.tasks.registry import load_env_cfg
+### Key config values (`agents/configs/sac_config.yaml`)
+- `motion_path` — path to the `.npz` motion file (must exist before launch).
+- `device: cuda:0` — set GPU.
+- `num_learning_iterations: 25000` — each iter = one `env.step()` across all envs. Total env transitions = `num_learning_iterations × num_envs`.
+- `buffer_size: 1024` — **per-env**; total capacity = `buffer_size × num_envs`.
+- `gradient_steps: 8` — SGD updates per rollout tick.
+- `learning_starts: 10` — iterations of random-action warmup.
+- `gamma: 0.97`, `tau: 0.005`, `lr: 3e-4`, `weight_decay: 1e-3`.
+- `alpha_init: 0.001`, `target_entropy_ratio: 0.5` (→ `target_entropy = -0.5 * act_dim`).
+- `use_layer_norm`, `use_mean_q` — flipped on together by `--fast-sac`.
 
-env_cfg = load_env_cfg("Unitree-G1-Tracking-No-State-Estimation")
-env_cfg.commands["motion"].motion_file = "path/to/motion.npz"
+## Monitoring
 
-env = ManagerBasedRlEnv(cfg=env_cfg, device="cuda")
-env = RslRlVecEnvWrapper(env, clip_actions=True)
+Watch these wandb panels during training:
+- `episode/avg_return` — primary success signal.
+- `q/max`, `q/mean` — divergence canary; if `q/max` grows unboundedly, the critic is overestimating → likely loss of run.
+- `loss/critic`, `loss/actor`, `loss/alpha` — should all trend downward or stabilize.
+- `policy/entropy` vs `policy/target_entropy` — alpha autotune should close the gap over time.
+- `alpha/value` — if stuck at `alpha_init` for thousands of iters, entropy pressure is not triggering; consider raising `alpha_init` or lowering `target_entropy_ratio`.
+- `grad/critic_norm`, `grad/actor_norm` — spikes = instability.
+- `perf/env_steps_per_sec` — throughput baseline; sudden drops suggest stalls.
+- `buffer/size` — should saturate at `buffer_size × num_envs`.
 
-obs = env.reset()  # [num_envs, obs_dim]
-actions = agent.select_action(obs)
-obs_next, rewards, dones, infos = env.step(actions)
+## Checkpoints
+
+Saved under `models/<run_name>/`:
+- `ckpt_step_<N>.pt` at 25%, 50%, 75% of `num_learning_iterations` (configurable via `ckpt_fractions`).
+- `final.pt` at end of run.
+
+Resume with:
+```bash
+python scripts/train/train_sac.py --load models/<run_name>/ckpt_step_<N>.pt --name <new_name>
 ```
+
+## Troubleshooting
+
+- **`FileNotFoundError: .../src/assets/motions/g1/...npz`** during conversion → the `--output-name` contained subdirs; pass just a filename.
+- **`ModuleNotFoundError: tyro`** → `pip install tyro`.
+- **CUDA not available** → check `torch.cuda.is_available()`; reinstall torch with matching CUDA version.
+- **`src.tasks` import error** in `csv_to_npz.py` → the script expects a `src/` layout; add `src/` → `unitree_rl_mjlab/src/` symlink or run from the submodule root.
+- **OOM at `num_envs=4096`** → drop `num_envs` or `critic_hidden_dim`/`actor_hidden_dim`.

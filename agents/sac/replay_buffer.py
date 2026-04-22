@@ -1,76 +1,83 @@
-from torch import device
-import torch 
-import numpy as np
+import torch
 
-# need to make this work with mjlab, using torch tensors instead of numpy arrays
 
 class ReplayBuffer:
+    """Per-env replay buffer.
+
+    Stores `buffer_size` transitions *per env*, so total capacity is
+    `buffer_size * num_envs`. Each env has its own ring; a single scalar
+    pointer advances once per `add()` call. Sampling draws uniformly over
+    all (step, env) pairs currently populated.
+    """
+
     def __init__(
-        self, 
-        max_size: int,
-        num_envs: int, 
-        actor_obs_dim: int, 
-        critic_obs_dim: int, 
-        act_dim: int, 
-        device: torch.device
+        self,
+        max_size: int,        # per-env capacity
+        num_envs: int,
+        actor_obs_dim: int,
+        critic_obs_dim: int,
+        act_dim: int,
+        device: torch.device,
     ):
-        self.max_size = max_size # max number of transitions to store
-        self.num_envs = num_envs # number of environments
-        self.actor_obs_dim = actor_obs_dim # dimension of observation space for actor
-        self.critic_obs_dim = critic_obs_dim # dimension of observation space for critic
-        self.act_dim = act_dim # dimension of action space
-        self.device = device # device to store the data
+        self.max_size = max_size
+        self.num_envs = num_envs
+        self.actor_obs_dim = actor_obs_dim
+        self.critic_obs_dim = critic_obs_dim
+        self.act_dim = act_dim
+        self.device = device
 
-        self.actor_obs = torch.zeros((max_size, actor_obs_dim), dtype=torch.float32, device=device)
-        self.critic_obs = torch.zeros((max_size, critic_obs_dim), dtype=torch.float32, device=device)
-        self.actions = torch.zeros((max_size, act_dim), dtype=torch.float32, device=device)
-        self.rewards = torch.zeros((max_size, 1), dtype=torch.float32, device=device)
-        self.next_actor_obs = torch.zeros((max_size, actor_obs_dim), dtype=torch.float32, device=device)
-        self.next_critic_obs = torch.zeros((max_size, critic_obs_dim), dtype=torch.float32, device=device)
-        self.dones = torch.zeros((max_size, 1), dtype=torch.float32, device=device)
+        shape = (max_size, num_envs)
+        self.actor_obs       = torch.zeros((*shape, actor_obs_dim),  dtype=torch.float32, device=device)
+        self.critic_obs      = torch.zeros((*shape, critic_obs_dim), dtype=torch.float32, device=device)
+        self.actions         = torch.zeros((*shape, act_dim),        dtype=torch.float32, device=device)
+        self.rewards         = torch.zeros((*shape, 1),              dtype=torch.float32, device=device)
+        self.next_actor_obs  = torch.zeros((*shape, actor_obs_dim),  dtype=torch.float32, device=device)
+        self.next_critic_obs = torch.zeros((*shape, critic_obs_dim), dtype=torch.float32, device=device)
+        self.dones           = torch.zeros((*shape, 1),              dtype=torch.float32, device=device)
 
-        self.ptr = 0 # pointer to the next available slot
-        self.size = 0 # number of transitions currently stored
+        self.ptr  = 0  # next row to write (per env)
+        self.size = 0  # number of rows populated per env
 
     def add(
         self,
-        actor_obs: torch.Tensor, # shape: (num_envs, actor_obs_dim)
-        critic_obs: torch.Tensor, # shape: (num_envs, critic_obs_dim)
-        action: torch.Tensor, # shape: (num_envs, act_dim)
-        reward: torch.Tensor, # shape: (num_envs,)
-        next_actor_obs: torch.Tensor, # shape: (num_envs, actor_obs_dim)
-        next_critic_obs: torch.Tensor, # shape: (num_envs, critic_obs_dim)
-        done: torch.Tensor, # shape: (num_envs,)
+        actor_obs: torch.Tensor,        # (num_envs, actor_obs_dim)
+        critic_obs: torch.Tensor,       # (num_envs, critic_obs_dim)
+        action: torch.Tensor,           # (num_envs, act_dim)
+        reward: torch.Tensor,           # (num_envs,) or (num_envs, 1)
+        next_actor_obs: torch.Tensor,
+        next_critic_obs: torch.Tensor,
+        done: torch.Tensor,             # (num_envs,) bool/float
     ):
-        num_envs = self.num_envs
+        if reward.dim() == 1:
+            reward = reward.unsqueeze(-1)
+        if done.dim() == 1:
+            done = done.unsqueeze(-1)
 
-        idx = torch.arange(self.ptr, self.ptr + num_envs, device=self.device) % self.max_size
+        p = self.ptr
+        self.actor_obs[p]       = actor_obs
+        self.critic_obs[p]      = critic_obs
+        self.actions[p]         = action
+        self.rewards[p]         = reward
+        self.next_actor_obs[p]  = next_actor_obs
+        self.next_critic_obs[p] = next_critic_obs
+        self.dones[p]           = done.float()
 
-        self.actor_obs[idx] = actor_obs
-        self.critic_obs[idx] = critic_obs
-        self.actions[idx] = action
-        self.rewards[idx] = reward
-        self.next_actor_obs[idx] = next_actor_obs
-        self.next_critic_obs[idx] = next_critic_obs
-        self.dones[idx] = done
+        self.ptr  = (self.ptr + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
 
-        self.ptr = (self.ptr + num_envs) % self.max_size # advance pointer and wrap around max_size 
-        self.size = min(self.size + num_envs, self.max_size)
-
-    def sample(self, batch_size):
-
-        indices = torch.randint(0, self.size, size=(batch_size, ), device=self.device) # random indices of size 'batch size'
+    def sample(self, batch_size: int):
+        step_idx = torch.randint(0, self.size,      (batch_size,), device=self.device)
+        env_idx  = torch.randint(0, self.num_envs,  (batch_size,), device=self.device)
 
         return (
-            self.actor_obs[indices],
-            self.critic_obs[indices],
-            self.actions[indices],
-            self.rewards[indices],
-            self.next_actor_obs[indices],
-            self.next_critic_obs[indices],
-            self.dones[indices]
+            self.actor_obs[step_idx, env_idx],
+            self.critic_obs[step_idx, env_idx],
+            self.actions[step_idx, env_idx],
+            self.rewards[step_idx, env_idx],
+            self.next_actor_obs[step_idx, env_idx],
+            self.next_critic_obs[step_idx, env_idx],
+            self.dones[step_idx, env_idx],
         )
 
     def __len__(self):
-        return self.size
-        
+        return self.size * self.num_envs

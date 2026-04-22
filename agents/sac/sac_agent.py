@@ -10,11 +10,14 @@ from agents.sac.replay_buffer import ReplayBuffer
 
 class SACAgent(BaseAlgorithm):
     def __init__(self, actor_obs_dim, critic_obs_dim, act_dim, config):
-        self.actor = Actor(actor_obs_dim, act_dim, config.actor_hidden_dim).to(config.device)
-        self.critic = DoubleCritic(critic_obs_dim, act_dim, config.critic_hidden_dim).to(config.device) 
+        self.actor = Actor(
+            actor_obs_dim, act_dim, config.actor_hidden_dim,
+            log_std_min=config.log_std_min, log_std_max=config.log_std_max,
+        ).to(config.device)
+        self.critic = DoubleCritic(critic_obs_dim, act_dim, config.critic_hidden_dim, use_layer_norm=config.use_layer_norm).to(config.device) 
 
         # target critic, no gradients
-        self.critic_target = DoubleCritic(critic_obs_dim, act_dim, config.critic_hidden_dim).to(config.device)
+        self.critic_target = DoubleCritic(critic_obs_dim, act_dim, config.critic_hidden_dim, use_layer_norm=config.use_layer_norm).to(config.device)
         self.critic_target.load_state_dict(self.critic.state_dict()) #identical networks 
 
         # opt
@@ -34,8 +37,8 @@ class SACAgent(BaseAlgorithm):
         )
 
         # entropy temperature autotuning
-        self.target_entropy = -act_dim / 2  # FastSAC: -|A|/2 for tracking tasks
-        self.log_alpha      = torch.tensor([np.log(0.001)], dtype=torch.float32, requires_grad=True, device=config.device)
+        self.target_entropy = -act_dim * config.target_entropy_ratio
+        self.log_alpha      = torch.tensor([np.log(config.alpha_init)], dtype=torch.float32, requires_grad=True, device=config.device)
         self.alpha_optimizer = torch.optim.AdamW([self.log_alpha], lr=config.lr, weight_decay=0.0, betas=(0.9, 0.95), fused=True)
 
         # replay buffer
@@ -53,6 +56,31 @@ class SACAgent(BaseAlgorithm):
         self.actor_obs_dim = actor_obs_dim
         self.critic_obs_dim = critic_obs_dim
         self.act_dim = act_dim
+
+        self._q_agg = self.critic.mean_Q if config.use_mean_q else self.critic.min_Q
+
+        self._q_agg_target = self.critic_target.mean_Q if config.use_mean_q else self.critic_target.min_Q
+
+        # metric accumulator: {name: (running_sum_tensor, count)}
+        self._metric_sums: dict[str, torch.Tensor] = {}
+        self._metric_count: int = 0
+
+    def _accum(self, m: dict[str, torch.Tensor]) -> None:
+        for k, v in m.items():
+            if k not in self._metric_sums:
+                self._metric_sums[k] = v.detach().clone()
+            else:
+                self._metric_sums[k] += v.detach()
+        self._metric_count += 1
+
+    def pop_metrics(self) -> dict[str, float]:
+        if self._metric_count == 0:
+            return {}
+        n = self._metric_count
+        out = {k: (v / n).item() for k, v in self._metric_sums.items()}
+        self._metric_sums.clear()
+        self._metric_count = 0
+        return out
     
     def select_action(self, state, deterministic=False):
         with torch.no_grad():
@@ -74,10 +102,11 @@ class SACAgent(BaseAlgorithm):
 
         for _ in range(self.config.gradient_steps):
             actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done = self.buffer.sample(self.config.batch_size)
-            self._update_critic(actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done)
-            self._update_actor(actor_obs, critic_obs)
-            self._update_alpha(actor_obs)
+            m_c = self._update_critic(actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done)
+            m_a = self._update_actor(actor_obs, critic_obs)
+            m_alpha = self._update_alpha(actor_obs)
             self._soft_update_targets()
+            self._accum({**m_c, **m_a, **m_alpha})
     
     def _update_critic(self, actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done):
         with torch.no_grad():
@@ -85,24 +114,46 @@ class SACAgent(BaseAlgorithm):
 
             alpha = self.log_alpha.exp()
 
-            y = r + self.config.gamma * (self.critic_target.min_Q(next_critic_obs, a_next) - alpha*log_prob) * (1 - done)
+            y = r + self.config.gamma * (self._q_agg_target(next_critic_obs, a_next) - alpha*log_prob) * (1 - done)
 
-        q1, q2 = self.critic(critic_obs, a) #forward 
+        q1, q2 = self.critic(critic_obs, a) #forward
         critic_loss = F.mse_loss(q1, y) + F.mse_loss(q2, y)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float('inf'))
         self.critic_optimizer.step()
+
+        with torch.no_grad():
+            return {
+                "loss/critic":    critic_loss.detach(),
+                "q/mean":         0.5 * (q1.mean() + q2.mean()),
+                "q/max":          torch.maximum(q1.max(), q2.max()),
+                "q/min":          torch.minimum(q1.min(), q2.min()),
+                "q/target_mean":  y.mean(),
+                "grad/critic_norm": grad_norm.detach(),
+            }
     
     def _update_actor(self, actor_obs, critic_obs):
         a, log_prob = self.actor.sample(actor_obs)
         alpha = self.log_alpha.exp().detach()
 
-        actor_loss = (alpha * log_prob - self.critic.min_Q(critic_obs, a)).mean()
+        actor_loss = (alpha * log_prob - self._q_agg(critic_obs, a)).mean()
 
-        self.actor_optimizer.zero_grad()  
+        self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float('inf'))
         self.actor_optimizer.step()
+
+        with torch.no_grad():
+            _, log_std = self.actor.forward(actor_obs)
+            return {
+                "loss/actor":         actor_loss.detach(),
+                "policy/entropy":     -log_prob.mean().detach(),
+                "policy/log_prob":    log_prob.mean().detach(),
+                "policy/action_std":  log_std.exp().mean().detach(),
+                "grad/actor_norm":    grad_norm.detach(),
+            }
     
     def _update_alpha(self, actor_obs):
         with torch.no_grad():
@@ -112,6 +163,13 @@ class SACAgent(BaseAlgorithm):
         self.alpha_optimizer.zero_grad()
         alpha_loss.backward()
         self.alpha_optimizer.step()
+
+        with torch.no_grad():
+            return {
+                "loss/alpha":   alpha_loss.detach(),
+                "alpha/value":  self.log_alpha.exp().detach().squeeze(),
+                "alpha/log":    self.log_alpha.detach().squeeze(),
+            }
     
     @torch.no_grad()
     def _soft_update_targets(self):

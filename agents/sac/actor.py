@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 
-LOG_STD_MAX = 0.0
-LOG_STD_MIN = -20.0
+
 
 class Actor(nn.Module):
-    def __init__(self, actor_obs_dim, act_dim, hidden_dim:list[int]):
+    def __init__(self, actor_obs_dim, act_dim, hidden_dim:list[int], log_std_min: float = -20.0, log_std_max: float = 0.0):
         super().__init__()
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
 
         layers = []
         in_dim = actor_obs_dim
@@ -27,7 +28,7 @@ class Actor(nn.Module):
         mean = self.mean_head(x)
         log_std = self.log_std_head(x)
 
-        log_std = torch.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
+        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
 
         return mean, log_std
 
