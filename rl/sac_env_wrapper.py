@@ -14,8 +14,8 @@ class SACVecEnvWrapper:
 
         self.clip_actions = clip_actions
 
-        self.actor_obs_dim  = env.single_observation_space["actor"].shape[0]
-        self.critic_obs_dim = env.single_observation_space["critic"].shape[0]
+        self.actor_obs_dim  = env.single_observation_space.spaces["actor"].shape[0]
+        self.critic_obs_dim = env.single_observation_space.spaces["critic"].shape[0]
         self.act_dim        = env.single_action_space.shape[0]
         self.env.reset()    # call once at init
     
