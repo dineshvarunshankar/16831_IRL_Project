@@ -28,6 +28,7 @@ class SACConfig:
     use_layer_norm          : bool
     use_mean_q              : bool
     num_envs                : int = 4096
+    policy_frequency        : int = 1
 
 @dataclass
 class PPOConfig:

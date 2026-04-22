@@ -16,6 +16,7 @@ buffer_size: 1024  # per-env; total capacity = buffer_size * num_envs
 num_learning_iterations: 25000
 learning_starts: 10
 gradient_steps: 8
+policy_frequency: 4   # TD3-style delayed actor: actor+alpha updated every N critic updates
 
 # entropy / alpha
 alpha_init: 0.001 #need to tune this - was 0.1 for sac_vanilla

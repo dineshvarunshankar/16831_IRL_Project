@@ -65,6 +65,10 @@ class SACAgent(BaseAlgorithm):
         self._metric_sums: dict[str, torch.Tensor] = {}
         self._metric_count: int = 0
 
+        # TD3-style delayed policy updates: actor + alpha update every N critic updates
+        self.policy_frequency = getattr(config, 'policy_frequency', 1)
+        self._update_counter = 0
+
     def _accum(self, m: dict[str, torch.Tensor]) -> None:
         for k, v in m.items():
             if k not in self._metric_sums:
@@ -103,10 +107,17 @@ class SACAgent(BaseAlgorithm):
         for _ in range(self.config.gradient_steps):
             actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done = self.buffer.sample(self.config.batch_size)
             m_c = self._update_critic(actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done)
-            m_a = self._update_actor(actor_obs, critic_obs)
-            m_alpha = self._update_alpha(actor_obs)
+
+            # TD3-style delayed actor + alpha update
+            self._update_counter += 1
+            if self._update_counter % self.policy_frequency == 0:
+                m_a     = self._update_actor(actor_obs, critic_obs)
+                m_alpha = self._update_alpha(actor_obs)
+                self._accum({**m_c, **m_a, **m_alpha})
+            else:
+                self._accum(m_c)
+
             self._soft_update_targets()
-            self._accum({**m_c, **m_a, **m_alpha})
     
     def _update_critic(self, actor_obs, critic_obs, a, r, next_actor_obs, next_critic_obs, done):
         with torch.no_grad():
