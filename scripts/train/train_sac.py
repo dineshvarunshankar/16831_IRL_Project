@@ -7,6 +7,7 @@ from collections import deque
 from datetime import datetime
 
 import mjlab.tasks
+import src.tasks  # noqa: F401  — registers Unitree-G1-Tracking
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg
