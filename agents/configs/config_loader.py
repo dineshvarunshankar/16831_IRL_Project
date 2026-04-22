@@ -3,21 +3,31 @@ from dataclasses import dataclass
 
 @dataclass
 class SACConfig:
-    motion_path       : str
-    actor_hidden_dim  : list[int]
-    critic_hidden_dim : list[int]
-    lr                : float
-    gamma             : float
-    tau               : float
-    batch_size        : int
-    buffer_size       : int
-    total_steps       : int
-    learning_starts   : int
-    gradient_steps    : int
-    log_freq          : int
-    save_freq         : int
-    device            : str
-    num_envs          : int
+    motion_path             : str
+    device                  : str
+    seed                    : int
+    wandb_project           : str
+    actor_hidden_dim        : list[int]
+    critic_hidden_dim       : list[int]
+    lr                      : float
+    weight_decay            : float
+    gamma                   : float
+    tau                     : float
+    batch_size              : int
+    buffer_size             : int
+    num_learning_iterations : int
+    learning_starts         : int
+    gradient_steps          : int
+    alpha_init              : float
+    target_entropy_ratio    : float
+    log_std_min             : float
+    log_std_max             : float
+    log_freq                : int
+    ep_stats_window         : int
+    ckpt_fractions          : list[float]
+    use_layer_norm          : bool
+    use_mean_q              : bool
+    num_envs                : int = 4096
 
 @dataclass
 class PPOConfig:
@@ -53,7 +63,8 @@ class PPOConfig:
 
 def _auto_device(cfg):
     import torch
-    cfg['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if 'device' not in cfg:
+        cfg['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
     return cfg
 
 def load_config(path):
