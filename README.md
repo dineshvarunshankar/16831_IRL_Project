@@ -3,9 +3,10 @@
 ## Setup (Linux, CUDA)
 
 ```bash
-# 1. Clone
-git clone --recurse-submodules <repo-url>
-cd 16831_IRL_Project
+# 1. Clone (vyvas-mjlab branch only, with submodules)
+git clone --branch vyvas-mjlab --single-branch --recurse-submodules \
+  https://github.com/dineshvarunshankar/LocoMimic.git
+cd LocoMimic
 
 # 2. Create env
 conda create -n mjlab python=3.10 -y
