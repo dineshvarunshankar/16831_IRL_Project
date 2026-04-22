@@ -7,6 +7,8 @@ unitree_rl_mjlab
 # Experiment artifacts
 /wandb/
 /MUJOCO_LOG.TXT
+/logs/
+/models/
 
 # Python
 **/__pycache__/

@@ -3,16 +3,22 @@
 ## Setup (Linux, CUDA)
 
 ```bash
-# 1. Clone (vyvas-mjlab branch only, with submodules)
+# 1. Install Miniconda (skip if already installed)
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
+bash /tmp/miniconda.sh -b -p $HOME/miniconda3
+source $HOME/miniconda3/etc/profile.d/conda.sh
+conda init bash && exec bash   # or restart shell
+
+# 2. Clone (vyvas-mjlab branch only, with submodules)
 git clone --branch vyvas-mjlab --single-branch --recurse-submodules \
   https://github.com/dineshvarunshankar/LocoMimic.git
 cd LocoMimic
 
-# 2. Create env
+# 3. Create env
 conda create -n mjlab python=3.10 -y
 conda activate mjlab
 
-# 3. One-shot install
+# 4. One-shot install
 bash setup.sh
 wandb login
 ```
@@ -63,9 +69,11 @@ Notes:
 
 ## Train SAC
 
+Run with `-m` from repo root so `sys.path` includes the project (needed for `rl` / `agents` imports).
+
 ### Smoke test (5 minutes)
 ```bash
-python scripts/train/train_sac.py \
+python -m scripts.train.train_sac \
   --name smoketest \
   --num_envs 256 \
   --iter 500
@@ -75,14 +83,14 @@ Check: stdout prints log lines, wandb run opens, no NaNs in `loss/critic` or `q/
 
 ### Full run (vanilla SAC)
 ```bash
-python scripts/train/train_sac.py \
+python -m scripts.train.train_sac \
   --name sac_vanilla \
   --num_envs 4096
 ```
 
 ### Full run (FastSAC-style: LayerNorm + mean-of-Qs)
 ```bash
-python scripts/train/train_sac.py \
+python -m scripts.train.train_sac \
   --name sac_fast \
   --num_envs 4096 \
   --fast-sac
@@ -130,7 +138,7 @@ Saved under `models/<run_name>/`:
 
 Resume with:
 ```bash
-python scripts/train/train_sac.py --load models/<run_name>/ckpt_step_<N>.pt --name <new_name>
+python -m scripts.train.train_sac --load models/<run_name>/ckpt_step_<N>.pt --name <new_name>
 ```
 
 ## Troubleshooting

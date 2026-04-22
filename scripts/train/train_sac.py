@@ -39,6 +39,7 @@ def train():
         config.num_learning_iterations = args.iter
 
     if args.fast_sac:
+        print("Will use layer norm amd mean Q values")
         config.use_layer_norm = True
         config.use_mean_q = True
 
