@@ -4,13 +4,13 @@ device: "cuda:0"
 seed: 42
 wandb_project: "locomimic"
 
-actor_hidden_dim: [512, 512]
-critic_hidden_dim: [512, 512]
+actor_hidden_dim: [256, 256]
+critic_hidden_dim: [256, 256]
 
 lr: 0.0003
 weight_decay: 0.001
 gamma: 0.97 # was 0.99
-tau: 0.125
+tau: 0.005 # was 0.125 for sac_vanilla
 batch_size: 4096
 buffer_size: 1024  # per-env; total capacity = buffer_size * num_envs
 num_learning_iterations: 25000
@@ -18,11 +18,11 @@ learning_starts: 10
 gradient_steps: 8
 
 # entropy / alpha
-alpha_init: 0.1 #need to tune this 
+alpha_init: 0.001 #need to tune this - was 0.1 for sac_vanilla
 target_entropy_ratio: 0.5  # target_entropy = -act_dim * ratio
 
 # actor log_std clamp
-log_std_min: -5.0
+log_std_min: -20
 log_std_max: 0.0
 
 # logging

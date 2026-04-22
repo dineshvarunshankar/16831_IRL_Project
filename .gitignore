@@ -30,3 +30,4 @@ build/
 # IDE
 .vscode/
 .idea/
+docs.md

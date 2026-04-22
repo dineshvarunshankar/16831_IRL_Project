@@ -86,6 +86,10 @@ def train():
 
     if args.load:
         agent.load(args.load)
+        rms_path = args.load.replace('.pt', '.rms.pt')
+        if os.path.exists(rms_path):
+            env.load_state_dict(torch.load(rms_path, map_location=config.device))
+            print(f'Loaded obs normalizer: {rms_path}')
         print(f'Loaded checkpoint: {args.load}')
 
     print(f'Run    : {run_name}')
@@ -218,11 +222,13 @@ def train():
         if step in ckpt_steps:
             path = f'{run_model_dir}/ckpt_step_{step}.pt'
             agent.save(path)
+            torch.save(env.state_dict(), path.replace('.pt', '.rms.pt'))
             print(f'Checkpoint saved: {path}')
 
     # final save
     final_path = f'{run_model_dir}/final.pt'
     agent.save(final_path)
+    torch.save(env.state_dict(), final_path.replace('.pt', '.rms.pt'))
     print(f'Final model saved: {final_path}')
 
     env.close()
