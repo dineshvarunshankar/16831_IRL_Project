@@ -65,6 +65,7 @@ def train():
     motion_cmd = env_cfg.commands['motion']
     assert isinstance(motion_cmd, MotionCommandCfg)
     motion_cmd.motion_file = config.motion_path
+    motion_cmd.sampling_mode = "uniform"
 
     env_cfg.auto_reset     = False
     env_cfg.scene.num_envs = args.num_envs
