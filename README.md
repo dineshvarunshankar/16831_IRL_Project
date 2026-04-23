@@ -141,6 +141,54 @@ Resume with:
 python -m scripts.train.train_sac --load models/<run_name>/ckpt_step_<N>.pt --name <new_name>
 ```
 
+## Evaluate (macOS or Linux)
+
+After a run, pull the checkpoint locally (see rsync section below), then:
+
+```bash
+# macOS (CPU, MuJoCo native viewer)
+python -m scripts.eval.eval_sac \
+  --ckpt models/<run_name>/final.pt \
+  --device cpu
+
+# Linux (GPU, headless or with viewer)
+python -m scripts.eval.eval_sac \
+  --ckpt models/<run_name>/final.pt \
+  --device cuda:0
+```
+
+Flags:
+| Flag | Default | Description |
+|---|---|---|
+| `--ckpt` | (required) | checkpoint `.pt` file (also loads matching `.rms.pt` sidecar if present) |
+| `--config` | `agents/configs/sac_config.yaml` | same config used for training |
+| `--task` | `Unitree-G1-Tracking` | mjlab task id |
+| `--device` | `cpu` | `cpu` on Mac, `cuda:0` on Linux |
+| `--num_envs` | 1 | single env for visualization |
+| `--steps` | 2000 | total env steps to run |
+| `--no-render` | off | disable viewer (for scripted return evaluation) |
+
+macOS notes:
+- Requires `pip install mujoco` (CPU build) — the CUDA-backed `mjlab` still runs on CPU via MuJoCo's native backend.
+- If the viewer fails to open, try `export MUJOCO_GL=glfw` (or `egl` for offscreen).
+- Expect low FPS — single-env CPU rollout is only for inspection, not training.
+
+## Sync from EC2 (pull artifacts locally)
+
+```bash
+# Set once
+EC2_IP=<public-ip>
+KEY=~/.ssh/locomimic-key.pem
+REMOTE=/home/ubuntu/LocoMimic
+
+# Pull models, logs, wandb (non-destructive; won't delete local files)
+rsync -avz --progress -e "ssh -i $KEY" ubuntu@$EC2_IP:$REMOTE/models/ ./models/
+rsync -avz --progress -e "ssh -i $KEY" ubuntu@$EC2_IP:$REMOTE/logs/   ./logs/
+rsync -avz --progress -e "ssh -i $KEY" ubuntu@$EC2_IP:$REMOTE/wandb/  ./wandb/
+```
+
+First connection to a new IP: add `-o StrictHostKeyChecking=accept-new` to the `-e` string.
+
 ## Troubleshooting
 
 - **`FileNotFoundError: .../src/assets/motions/g1/...npz`** during conversion → the `--output-name` contained subdirs; pass just a filename.
