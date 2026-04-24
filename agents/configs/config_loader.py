@@ -32,6 +32,10 @@ class SACConfig:
     use_autotune            : bool = True
     alpha_lr                : float = 3e-5
     critic_grad_clip        : float = 1.0
+    use_distributional      : bool = False
+    num_atoms               : int = 101
+    v_min                   : float = -20.0
+    v_max                   : float = 20.0
 
 @dataclass
 class PPOConfig:

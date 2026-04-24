@@ -35,3 +35,9 @@ ckpt_fractions: [0.25, 0.50, 0.75]
 
 use_layer_norm: false
 use_mean_q: false
+
+# distributional critic (C51)
+use_distributional: false
+num_atoms: 101
+v_min: -20.0
+v_max: 20.0
