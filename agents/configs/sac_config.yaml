@@ -19,8 +19,10 @@ gradient_steps: 4
 policy_frequency: 2   # TD3-style delayed actor: actor+alpha updated every N critic updates
 
 # entropy / alpha
-alpha_init: 0.001 #need to tune this - was 0.1 for sac_vanilla
+alpha_init: 0.2
 target_entropy_ratio: 0.5  # target_entropy = -act_dim * ratio
+use_autotune: false        # false = fixed alpha at alpha_init (diagnostic for alpha oscillation)
+alpha_lr: 0.00003          # slower than critic lr; only used if use_autotune=true
 
 # actor log_std clamp
 log_std_min: -5.0

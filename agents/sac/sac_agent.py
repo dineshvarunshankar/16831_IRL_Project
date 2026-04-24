@@ -37,9 +37,21 @@ class SACAgent(BaseAlgorithm):
         )
 
         # entropy temperature autotuning
+        self.use_autotune = getattr(config, 'use_autotune', True)
         self.target_entropy = -act_dim * config.target_entropy_ratio
-        self.log_alpha      = torch.tensor([np.log(config.alpha_init)], dtype=torch.float32, requires_grad=True, device=config.device)
-        self.alpha_optimizer = torch.optim.AdamW([self.log_alpha], lr=config.lr, weight_decay=0.0, betas=(0.9, 0.95), fused=True)
+        self.log_alpha = torch.tensor(
+            [np.log(config.alpha_init)],
+            dtype=torch.float32,
+            requires_grad=self.use_autotune,
+            device=config.device,
+        )
+        if self.use_autotune:
+            alpha_lr = getattr(config, 'alpha_lr', config.lr)
+            self.alpha_optimizer = torch.optim.AdamW(
+                [self.log_alpha], lr=alpha_lr, weight_decay=0.0, betas=(0.9, 0.95), fused=True
+            )
+        else:
+            self.alpha_optimizer = None
 
         # replay buffer
         self.buffer = ReplayBuffer(
@@ -111,9 +123,12 @@ class SACAgent(BaseAlgorithm):
             # TD3-style delayed actor + alpha update
             self._update_counter += 1
             if self._update_counter % self.policy_frequency == 0:
-                m_a     = self._update_actor(actor_obs, critic_obs)
-                m_alpha = self._update_alpha(actor_obs)
-                self._accum({**m_c, **m_a, **m_alpha})
+                m_a = self._update_actor(actor_obs, critic_obs)
+                if self.use_autotune:
+                    m_alpha = self._update_alpha(actor_obs)
+                    self._accum({**m_c, **m_a, **m_alpha})
+                else:
+                    self._accum({**m_c, **m_a, "alpha/value": self.log_alpha.exp().detach().squeeze()})
             else:
                 self._accum(m_c)
 
@@ -191,15 +206,17 @@ class SACAgent(BaseAlgorithm):
         torch._foreach_add_(tgt, src, alpha=tau)
      
     def save(self, path):
-        torch.save({
+        ckpt = {
             'actor'          : self.actor.state_dict(),
             'critic'         : self.critic.state_dict(),
             'critic_target'  : self.critic_target.state_dict(),
             'actor_optimizer': self.actor_optimizer.state_dict(),
             'critic_optimizer': self.critic_optimizer.state_dict(),
             'log_alpha'      : self.log_alpha,
-            'alpha_optimizer': self.alpha_optimizer.state_dict(),
-        }, path)
+        }
+        if self.alpha_optimizer is not None:
+            ckpt['alpha_optimizer'] = self.alpha_optimizer.state_dict()
+        torch.save(ckpt, path)
 
     def load(self, path):
         checkpoint = torch.load(path, map_location=self.device)
@@ -209,4 +226,5 @@ class SACAgent(BaseAlgorithm):
         self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer'])
         self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer'])
         self.log_alpha.data.copy_(checkpoint['log_alpha'].data)
-        self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer'])
+        if self.alpha_optimizer is not None and 'alpha_optimizer' in checkpoint:
+            self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer'])

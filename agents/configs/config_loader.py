@@ -29,6 +29,8 @@ class SACConfig:
     use_mean_q              : bool
     num_envs                : int = 4096
     policy_frequency        : int = 1
+    use_autotune            : bool = True
+    alpha_lr                : float = 3e-5
 
 @dataclass
 class PPOConfig:
