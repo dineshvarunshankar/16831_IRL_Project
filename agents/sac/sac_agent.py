@@ -73,9 +73,11 @@ class SACAgent(BaseAlgorithm):
 
         self._q_agg_target = self.critic_target.mean_Q if config.use_mean_q else self.critic_target.min_Q
 
-        # metric accumulator: {name: (running_sum_tensor, count)}
+        # metric accumulator: per-metric running sum and count (metrics added on different
+        # update cadences — e.g. alpha/actor only every policy_frequency updates — need
+        # per-metric counts so pop_metrics reports the correct mean, not a cadence-scaled one).
         self._metric_sums: dict[str, torch.Tensor] = {}
-        self._metric_count: int = 0
+        self._metric_counts: dict[str, int] = {}
 
         # TD3-style delayed policy updates: actor + alpha update every N critic updates
         self.policy_frequency = getattr(config, 'policy_frequency', 1)
@@ -85,17 +87,17 @@ class SACAgent(BaseAlgorithm):
         for k, v in m.items():
             if k not in self._metric_sums:
                 self._metric_sums[k] = v.detach().clone()
+                self._metric_counts[k] = 1
             else:
                 self._metric_sums[k] += v.detach()
-        self._metric_count += 1
+                self._metric_counts[k] += 1
 
     def pop_metrics(self) -> dict[str, float]:
-        if self._metric_count == 0:
+        if not self._metric_counts:
             return {}
-        n = self._metric_count
-        out = {k: (v / n).item() for k, v in self._metric_sums.items()}
+        out = {k: (self._metric_sums[k] / self._metric_counts[k]).item() for k in self._metric_sums}
         self._metric_sums.clear()
-        self._metric_count = 0
+        self._metric_counts.clear()
         return out
     
     def select_action(self, state, deterministic=False):
@@ -147,7 +149,8 @@ class SACAgent(BaseAlgorithm):
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float('inf'))
+        critic_clip = getattr(self.config, 'critic_grad_clip', 1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), critic_clip)
         self.critic_optimizer.step()
 
         with torch.no_grad():

@@ -31,6 +31,7 @@ class SACConfig:
     policy_frequency        : int = 1
     use_autotune            : bool = True
     alpha_lr                : float = 3e-5
+    critic_grad_clip        : float = 1.0
 
 @dataclass
 class PPOConfig:
