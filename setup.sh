@@ -25,6 +25,7 @@ echo "==> [3/5] Installing TDMPC2 runtime deps (state-obs only, no dm-control/ko
 # only needed for TDMPC2's bundled non-mjlab envs and rgb obs.)
 pip install \
   "hydra-core==1.3.2" \
+  "hydra-submitit-launcher==1.2.0" \
   "omegaconf>=2.3,<3" \
   "gymnasium>=0.29,<2" \
   "tensordict" \
