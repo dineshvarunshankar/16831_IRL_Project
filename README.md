@@ -23,7 +23,7 @@ bash setup.sh
 wandb login
 ```
 
-`setup.sh` runs: submodule init → `pip install -e unitree_rl_mjlab` → `pip install wandb` → CUDA sanity check.
+`setup.sh` runs: submodule init (`unitree_rl_mjlab`, `agents/tdmpc2`) → `pip install -e unitree_rl_mjlab` → TDMPC2 runtime deps (`hydra-core`, `omegaconf`, `gymnasium`, `tensordict`, `torchrl`, `termcolor`, `pandas`) → `pip install wandb` → CUDA + import sanity check.
 
 ## Project Structure
 
@@ -31,19 +31,25 @@ wandb login
 .
 ├── unitree_rl_mjlab/          # Submodule: mjlab framework
 ├── agents/
-│   ├── base.py               
+│   ├── base.py
 │   ├── configs/
 │   │   ├── sac_config.yaml
 │   │   └── config_loader.py
-│   └── sac/
-│       ├── actor.py
-│       ├── critic.py
-│       ├── replay_buffer.py  
-│       └── sac_agent.py
+│   ├── sac/
+│   │   ├── actor.py
+│   │   ├── critic.py
+│   │   ├── replay_buffer.py
+│   │   └── sac_agent.py
+│   └── tdmpc2/                # Submodule: vyvas33/tdmpc2 fork (mjlab-integration branch)
+│       └── tdmpc2/
+│           ├── envs/mjlab.py  # single-env adapter for mjlab WBT
+│           ├── config.yaml    # Hydra config (mjlab defaults)
+│           └── train.py       # TDMPC2 entry point (Hydra)
 ├── rl/
-│   └── sac_env_wrapper.py     # vec-env wrapper for mjlab
+│   └── sac_env_wrapper.py     # vec-env wrapper for mjlab (also exports EmpiricalNormalization, reused by TDMPC2 adapter)
 ├── scripts/train/
-│   └── train_sac.py           # entry point
+│   ├── train_sac.py           # SAC entry point
+│   └── train_tdmpc2.sh        # TDMPC2 launcher (sets PYTHONPATH, runs Hydra train)
 ├── data/lafan1_retargeted/    # LAFAN1 motion CSVs
 ├── logs/                      # wandb + stdout logs
 └── models/                    # saved checkpoints
@@ -117,6 +123,58 @@ python -m scripts.train.train_sac \
 - `gamma: 0.97`, `tau: 0.005`, `lr: 3e-4`, `weight_decay: 1e-3`.
 - `alpha_init: 0.001`, `target_entropy_ratio: 0.5` (→ `target_entropy = -0.5 * act_dim`).
 - `use_layer_norm`, `use_mean_q` — flipped on together by `--fast-sac`.
+
+## Train TDMPC2
+
+TDMPC2 is integrated as a submodule (`agents/tdmpc2`, fork: `vyvas33/tdmpc2` branch `mjlab-integration`). The single-env adapter at `agents/tdmpc2/tdmpc2/envs/mjlab.py` wraps mjlab's `ManagerBasedRlEnv` with `num_envs=1`, exposes the actor obs view (matches PPO/SAC for fair comparison), and reuses `EmpiricalNormalization` from `rl/sac_env_wrapper.py`.
+
+Launch via the shell wrapper (handles `PYTHONPATH` so the adapter can import `rl.sac_env_wrapper` and `src.tasks`, then runs TDMPC2's native Hydra `train.py`):
+
+### Smoke test (~10 min on A10G)
+```bash
+./scripts/train/train_tdmpc2.sh \
+  steps=20000 \
+  seed_steps=2000 \
+  eval_freq=5000 \
+  enable_wandb=false
+```
+Check: training loop runs past `seed_steps`, buffer fills, `agent.update()` executes, eval episodes complete, no shape errors.
+
+### Full run
+```bash
+./scripts/train/train_tdmpc2.sh \
+  exp_name=tdmpc2_g1_tracking \
+  wandb_entity=<your-wandb-entity> \
+  steps=1_000_000
+```
+
+### Hydra overrides (pass as `key=value` after the script name)
+| Key | Default | Description |
+|---|---|---|
+| `task` | `mjlab-Unitree-G1-Tracking` | mjlab task id (prefix `mjlab-` is stripped before lookup) |
+| `motion_path` | `data/lafan1_retargeted_npz/g1/walk1_subject1.npz` | path to NPZ motion (must exist) |
+| `model_size` | `5` | TDMPC2 size preset: `1`, `5`, `19`, `48`, `317` (M params) |
+| `episodic` | `true` | required — WBT terminates early on falls/anchor drift |
+| `compile` | `false` | leave off until baseline trains; mjlab GPU sim + CUDA graphs is brittle |
+| `save_video` | `false` | mjlab render API doesn't fit TDMPC2's video logger |
+| `normalize_obs` | `true` | enable `EmpiricalNormalization` over actor obs |
+| `mjlab_max_episode_steps` | `500` | cap; some env_cfgs set `episode_length_s=1e9` |
+| `device` | `cuda` | torch device |
+| `seed_steps` | (auto = `5 × episode_length`) | random-action warmup before training begins |
+| `steps` | `10_000_000` | total env transitions |
+| `eval_freq` | `50000` | env steps between eval episodes |
+
+### Caveats
+- **Single env only.** TDMPC2's native trainer assumes one env; we run mjlab with `num_envs=1`. Wall-clock is much slower than vectorized SAC/PPO at 4096 envs — expect overnight runs. TDMPC2's win shows up in **transitions-to-reward**, not wall-clock.
+- **Logs land at** `agents/tdmpc2/tdmpc2/logs/mjlab-Unitree-G1-Tracking/<seed>/<exp_name>/` (Hydra default).
+- **Comparing to SAC/PPO:** plot `episode_reward` vs. `env_step` (transitions), not vs. wall time.
+
+### Updating the TDMPC2 submodule
+If you change anything inside `agents/tdmpc2/`, commit + push from there first, then bump the parent's pin:
+```bash
+cd agents/tdmpc2 && git add -p && git commit -m "..." && git push
+cd ../.. && git add agents/tdmpc2 && git commit -m "Bump tdmpc2 submodule" && git push
+```
 
 ## Monitoring
 
