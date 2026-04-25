@@ -2,3 +2,7 @@
 	path = unitree_rl_mjlab
 	url = https://github.com/dineshvarunshankar/unitree_rl_mjlab.git
 	branch = vyvas
+[submodule "agents/tdmpc2"]
+	path = agents/tdmpc2
+	url = https://github.com/vyvas33/tdmpc2.git
+	branch = mjlab-integration
