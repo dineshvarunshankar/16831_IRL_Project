@@ -38,6 +38,22 @@ class TDMPC2VecEnvWrapper:
         self.endog_obs_dim = int(endog_obs.shape[-1])
         self.exog_obs_dim = int(exog_obs.shape[-1])
 
+    @property
+    def actor_term_names(self) -> tuple[str, ...]:
+        if self._last_actor_terms is None:
+            return tuple()
+        return tuple(self._last_actor_terms.keys())
+
+    @property
+    def actor_term_shapes(self) -> dict[str, tuple[int, ...]]:
+        if self._last_actor_terms is None:
+            return {}
+        return {name: tuple(value.shape[1:]) for name, value in self._last_actor_terms.items()}
+
+    @property
+    def active_exogenous_terms(self) -> tuple[str, ...]:
+        return self._active_exogenous_terms
+
     def _flatten(self, x: torch.Tensor) -> torch.Tensor:
         return x.view(x.shape[0], -1)
 

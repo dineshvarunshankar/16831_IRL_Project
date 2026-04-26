@@ -30,7 +30,7 @@ class SACConfig:
 class TDMPC2Config:
     # Environment/task.
     motion_path: str
-    task: str = "Unitree-G1-Tracking"
+    task: str = "Unitree-G1-Tracking-No-State-Estimation"
     num_envs: int = 512
     seed: int = 42
     device: str = "cuda"
@@ -105,7 +105,6 @@ class TDMPC2Config:
     # Observation splicing.
     exogenous_terms: tuple[str, ...] = (
         "command",
-        "motion_anchor_pos_b",
         "motion_anchor_ori_b",
     )
 
@@ -166,6 +165,8 @@ def load_tdmpc2_config(path: str) -> TDMPC2Config:
         raw["tau"] = 1.0 - float(raw["q_target_ema"])
     if "support_range" in raw and "value_support" not in raw:
         raw["value_support"] = raw["support_range"]
+    if "exogenous_terms" in raw:
+        raw["exogenous_terms"] = tuple(raw["exogenous_terms"])
 
     cfg = _auto_device(raw)
     return TDMPC2Config(**cfg)

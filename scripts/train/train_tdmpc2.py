@@ -1,5 +1,6 @@
 import argparse
 import os
+from collections import defaultdict
 from datetime import datetime
 
 import torch
@@ -41,6 +42,45 @@ def _mean_metrics(metrics_list: list[dict[str, float]]) -> dict[str, float]:
     for k in list(agg.keys()):
         agg[k] *= inv
     return agg
+
+
+def _reward_term_means(env_cfg, env: ManagerBasedRlEnv) -> dict[str, float]:
+    reward_terms = getattr(env_cfg, "rewards", {})
+    if not isinstance(reward_terms, dict):
+        return {}
+    dt = float(getattr(env, "step_dt", 1.0))
+    means: dict[str, float] = {}
+    for name, term_cfg in reward_terms.items():
+        try:
+            value = term_cfg.func(env, **term_cfg.params)
+            weighted = value * float(term_cfg.weight) * dt
+            means[f"reward_term/{name}"] = float(weighted.mean().item())
+        except Exception:
+            continue
+    return means
+
+
+def _termination_flags(env_cfg, env: ManagerBasedRlEnv) -> dict[str, torch.Tensor]:
+    termination_terms = getattr(env_cfg, "terminations", {})
+    if not isinstance(termination_terms, dict):
+        return {}
+    flags: dict[str, torch.Tensor] = {}
+    for name, term_cfg in termination_terms.items():
+        try:
+            value = term_cfg.func(env, **term_cfg.params)
+        except Exception:
+            continue
+        if not isinstance(value, torch.Tensor):
+            continue
+        flags[name] = value.bool()
+    return flags
+
+
+def _print_actor_contract(env: TDMPC2VecEnvWrapper):
+    print("Actor obs :")
+    for name, shape in env.actor_term_shapes.items():
+        print(f"  - {name}: {shape}")
+    print(f"Exogenous : {env.active_exogenous_terms}")
 
 
 def train():
@@ -124,12 +164,18 @@ def train():
         config.horizon + 1,
     )
     print(f"Run       : {run_name}")
+    print(f"Task      : {config.task}")
     print(f"Device    : {config.device}")
     print(f"Num envs  : {config.num_envs}")
+    print(f"Motion    : {config.motion_path}")
+    print(f"Episode s : {float(env_cfg.episode_length_s):.1f}")
+    print(f"Step dt   : {float(env.env.step_dt):.3f}")
+    print(f"Max steps : {episode_steps}")
     print(f"Total step: {config.total_steps} ({config.step_unit})")
     print(f"Seed step : {seed_steps_env} env-frames")
     print(f"Seed iters: {seed_collect_iters}")
     print(f"Upd/iter  : {config.updates_per_collect}")
+    _print_actor_contract(env)
 
     endog_obs, exog_obs, _ = env.reset()
 
@@ -142,6 +188,8 @@ def train():
     collect_iter = 0
     next_log_step = config.log_freq
     next_save_step = config.save_freq
+    termination_counts_since_log: dict[str, float] = defaultdict(float)
+    timeout_count_since_log = 0.0
 
     while global_env_step < config.total_steps:
         if collect_iter < seed_collect_iters:
@@ -176,6 +224,13 @@ def train():
 
         episode_returns += reward
         episode_lengths += 1.0
+
+        termination_flags = _termination_flags(env_cfg, env.env)
+        for name, flag in termination_flags.items():
+            if name == "time_out":
+                continue
+            termination_counts_since_log[name] += float(flag.float().sum().item())
+        timeout_count_since_log += float(time_out.float().sum().item())
 
         done_any = terminated | time_out
         next_endog = next_endog_raw
@@ -218,6 +273,7 @@ def train():
             avg_l = sum(recent_lengths[-100:]) / min(100, len(recent_lengths))
             n_term = float(terminated.float().sum().item())
             n_timeout = float(time_out.float().sum().item())
+            reward_metrics = _reward_term_means(env_cfg, env.env)
 
             log_data = {
                 "episode/avg_return": avg_r,
@@ -225,19 +281,30 @@ def train():
                 "episode/num": episode_num,
                 "episode/terminated_count": n_term,
                 "episode/timeout_count": n_timeout,
+                "episode/max_steps": float(episode_steps),
                 "collect_iter": collect_iter,
                 "env_step": global_env_step,
             }
+            for name, count in termination_counts_since_log.items():
+                log_data[f"termination/{name}_count"] = count
+            log_data["termination/time_out_count"] = timeout_count_since_log
             log_data.update(metrics)
+            log_data.update(reward_metrics)
 
             if use_wandb:
                 wandb.log(log_data, step=global_env_step)
 
+            cause_str = " ".join(
+                f"{name}={count:.0f}" for name, count in sorted(termination_counts_since_log.items())
+            ) or "none"
             print(
                 f"Step {global_env_step:10d} | Ep {episode_num:6d} | "
                 f"Avg100 R={avg_r:8.2f} L={avg_l:6.1f} | "
-                f"term={n_term:.0f} timeout={n_timeout:.0f}"
+                f"term={n_term:.0f} timeout={n_timeout:.0f} | "
+                f"causes {cause_str} time_out={timeout_count_since_log:.0f}"
             )
+            termination_counts_since_log = defaultdict(float)
+            timeout_count_since_log = 0.0
 
         if global_env_step >= next_save_step:
             ckpt_path = f"{run_model_dir}/ckpt_step_{next_save_step}.pt"

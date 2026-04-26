@@ -57,7 +57,7 @@ python utils/convert_motions.py
 
 ```bash
 cd unitree_rl_mjlab
-python scripts/train.py Unitree-G1-Tracking \
+python scripts/train.py Unitree-G1-Tracking-No-State-Estimation \
   --motion-file ../data/motions_npz/walk1.npz \
   --env.scene.num-envs 4096
 cd ..
@@ -72,7 +72,7 @@ python -m scripts.train.train_sac \
   --num_envs 4096
 ```
 
-### Train TD-MPC2 (G1 State-Estimation Default)
+### Train TD-MPC2
 
 ```bash
 python -m scripts.train.train_tdmpc2 \
