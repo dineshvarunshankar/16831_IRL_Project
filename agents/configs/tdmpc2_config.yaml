@@ -2,7 +2,7 @@
 
 # Environment/task.
 motion_path: "data/motions_npz/walk1.npz"
-task: "Unitree-G1-Tracking"
+task: "Unitree-G1-Tracking-No-State-Estimation"
 num_envs: 512
 seed: 42
 device: "cuda"
