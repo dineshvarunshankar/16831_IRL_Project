@@ -45,6 +45,8 @@ pip install -r requirements.txt
 
 ## Usage
 
+Run these commands from the repo root (`LocoMimic/`).
+
 ### Convert Motion Data
 
 ```bash
@@ -64,8 +66,7 @@ cd ..
 ### Train SAC (Repo Baseline)
 
 ```bash
-
-python scripts/train/train_sac.py \
+python -m scripts.train.train_sac \
   --config agents/configs/sac_config.yaml \
   --task Unitree-G1-Tracking \
   --num_envs 4096
@@ -74,15 +75,14 @@ python scripts/train/train_sac.py \
 ### Train TD-MPC2 (G1 State-Estimation Default)
 
 ```bash
-
-python scripts/train/train_tdmpc2.py \
+python -m scripts.train.train_tdmpc2 \
   --config agents/configs/tdmpc2_config.yaml --name stable512_walk1
 ```
 
 
 ```bash
 # Example override for motion file and env count
-python scripts/train/train_tdmpc2.py \
+python -m scripts.train.train_tdmpc2 \
   --config agents/configs/tdmpc2_config.yaml \
   --motion-file data/motions_npz/walk1.npz \
   --num_envs 128 \
@@ -91,7 +91,7 @@ python scripts/train/train_tdmpc2.py \
 
 ```bash
 # Resume from checkpoint
-python scripts/train/train_tdmpc2.py \
+python -m scripts.train.train_tdmpc2 \
   --config agents/configs/tdmpc2_config.yaml \
   --load models/<run_name>/final.pt
 ```
@@ -99,7 +99,7 @@ python scripts/train/train_tdmpc2.py \
 ### Evaluate TD-MPC2 Checkpoint
 
 ```bash
-python scripts/eval/eval_tdmpc2.py \
+python -m scripts.eval.eval_tdmpc2 \
   --checkpoint models/<run_name>/final.pt \
   --config agents/configs/tdmpc2_config.yaml \
   --num-envs 32 \
