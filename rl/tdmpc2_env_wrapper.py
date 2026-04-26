@@ -32,6 +32,7 @@ class TDMPC2VecEnvWrapper:
         self._last_endog = None
         self._last_exog = None
         self._last_actor_terms: dict[str, torch.Tensor] | None = None
+        self._active_exogenous_terms: tuple[str, ...] = tuple()
 
         endog_obs, exog_obs, _ = self.reset()
         self.endog_obs_dim = int(endog_obs.shape[-1])
@@ -45,14 +46,17 @@ class TDMPC2VecEnvWrapper:
             exog_parts = []
             endog_parts = []
             term_map: dict[str, torch.Tensor] = {}
+            active_exog_terms: list[str] = []
             for key, value in actor_obs.items():
                 flat = self._flatten(value)
                 term_map[key] = flat
                 if key in self.exogenous_terms:
                     exog_parts.append(flat)
+                    active_exog_terms.append(key)
                 else:
                     endog_parts.append(flat)
             self._last_actor_terms = term_map
+            self._active_exogenous_terms = tuple(active_exog_terms)
 
             if len(exog_parts) == 0:
                 exog = torch.zeros((self.num_envs, 0), device=self.device)
@@ -116,7 +120,11 @@ class TDMPC2VecEnvWrapper:
         idx = (t0.unsqueeze(1) + offs).clamp(max=motion.time_step_total - 1)
 
         parts = []
-        for name in self.exogenous_terms:
+        term_names = self._active_exogenous_terms
+        if len(term_names) == 0:
+            term_names = self.exogenous_terms
+
+        for name in term_names:
             if name == "command":
                 joint_pos = motion.joint_pos[idx]
                 joint_vel = motion.joint_vel[idx]
@@ -162,7 +170,11 @@ class TDMPC2VecEnvWrapper:
 
         if len(parts) == 0:
             return self._repeat_current_exog(horizon)
-        return torch.cat(parts, dim=-1)
+        planned_exog = torch.cat(parts, dim=-1)
+        if planned_exog.shape[-1] != self.exog_obs_dim:
+            # Fallback to exact observed exogenous layout to avoid planner/model shape mismatch.
+            return self._repeat_current_exog(horizon)
+        return planned_exog
 
     def close(self):
         self.env.close()
