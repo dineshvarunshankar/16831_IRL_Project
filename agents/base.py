@@ -88,3 +88,20 @@ class BaseAlgorithm(ABC):
             metrics: Dictionary of current metrics
         """
         return {}
+
+    # Optional off-policy extension hooks.
+    # Algorithms such as SAC / TD-MPC2 may use internal replay and call update
+    # without passing a batch through the public update(...) method.
+    def store_transition(self, **kwargs) -> None:
+        """
+        Store one batched transition into algorithm-managed replay memory.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement store_transition()"
+        )
+
+    def update_from_replay(self) -> Dict[str, float]:
+        """
+        Run one update pass using algorithm-managed replay memory.
+        """
+        return {}

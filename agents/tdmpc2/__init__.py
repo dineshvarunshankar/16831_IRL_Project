@@ -1,8 +1,7 @@
 """
-TDMPC2 (Temporal Difference Model Predictive Control) Implementation
-
-TODO: Implement TDMPC2 algorithm here
-- agent.py: TDMPC2 agent class
-- world_model.py: Dynamics model
-- planner.py: MPC planner
+TDMPC2 (Temporal Difference Model Predictive Control) implementation.
 """
+
+from agents.tdmpc2.tdmpc2_agent import TDMPC2Agent
+
+__all__ = ["TDMPC2Agent"]
