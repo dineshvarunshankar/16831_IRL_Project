@@ -1,6 +1,3 @@
-# TD-MPC2 "stable-512" — conservative, verify learning first.
-# Use this FIRST. Switch to throughput-1024 only after losses decrease.
-
 # Environment/task.
 motion_path: "data/motions_npz/walk1.npz"
 task: "Unitree-G1-Tracking"

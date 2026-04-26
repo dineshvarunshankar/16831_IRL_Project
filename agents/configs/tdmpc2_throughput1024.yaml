@@ -1,6 +1,3 @@
-# TD-MPC2 "throughput-1024" — faster data, scaled updates.
-# Only use AFTER stable-512 shows decreasing losses.
-
 # Environment/task.
 motion_path: "data/motions_npz/walk1.npz"
 task: "Unitree-G1-Tracking"

@@ -64,7 +64,7 @@ cd ..
 ### Train SAC (Repo Baseline)
 
 ```bash
-# Motion file is read from agents/configs/sac_config.yaml (motion_path).
+
 python scripts/train/train_sac.py \
   --config agents/configs/sac_config.yaml \
   --task Unitree-G1-Tracking \
@@ -74,9 +74,7 @@ python scripts/train/train_sac.py \
 ### Train TD-MPC2 (G1 State-Estimation Default)
 
 ```bash
-# Uses agents/configs/tdmpc2_config.yaml defaults:
-# task=Unitree-G1-Tracking, num_envs=512, horizon=5
-# motion_path=data/motions_npz/walk1.npz
+
 python scripts/train/train_tdmpc2.py \
   --config agents/configs/tdmpc2_config.yaml --name stable512_walk1
 ```
