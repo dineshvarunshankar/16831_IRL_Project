@@ -6,6 +6,7 @@ import torch
 import wandb
 
 import mjlab.tasks  # noqa: F401
+import src.tasks  # noqa: F401
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
