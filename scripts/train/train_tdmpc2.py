@@ -190,8 +190,26 @@ def train():
     next_save_step = config.save_freq
     termination_counts_since_log: dict[str, float] = defaultdict(float)
     timeout_count_since_log = 0.0
+    # --- Termination curriculum ---
+    # Relax ee_body_pos threshold early so the agent survives longer, then tighten.
+    ee_threshold_start = 0.50
+    ee_threshold_end = 0.25
+    curriculum_steps = 2_000_000
+    ee_term_cfg = None
+    try:
+        ee_term_cfg = env.env.termination_manager.get_term_cfg("ee_body_pos")
+        ee_term_cfg.params["threshold"] = ee_threshold_start
+        print(f"Termination curriculum: ee_body_pos {ee_threshold_start} → {ee_threshold_end} over {curriculum_steps} steps")
+    except Exception as e:
+        print(f"[WARN] Could not set termination curriculum: {e}")
+        ee_term_cfg = None
 
     while global_env_step < config.total_steps:
+        # Update termination curriculum.
+        if ee_term_cfg is not None:
+            progress = min(float(global_env_step) / curriculum_steps, 1.0)
+            ee_term_cfg.params["threshold"] = ee_threshold_start + progress * (ee_threshold_end - ee_threshold_start)
+
         if collect_iter < seed_collect_iters:
             action = 2.0 * torch.rand(config.num_envs, env.act_dim, device=config.device) - 1.0
         else:

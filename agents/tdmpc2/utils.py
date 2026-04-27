@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
@@ -67,3 +68,50 @@ def logits_to_scalar(
     probs = F.softmax(logits, dim=-1)
     symlog_value = (probs * support).sum(dim=-1)
     return symexp(symlog_value)
+
+
+class RunningObsNormalizer(nn.Module):
+    """Running mean/std observation normalization.During training the running statistics are
+    updated with every new batch of observations; at inference time
+    (``update=False``) the frozen statistics are used.
+    """
+
+    def __init__(self, dim: int, clip: float = 5.0, eps: float = 1e-5):
+        super().__init__()
+        self.clip = clip
+        self.eps = eps
+        self.register_buffer("mean", torch.zeros(dim))
+        self.register_buffer("var", torch.ones(dim))
+        self.register_buffer("count", torch.tensor(0, dtype=torch.long))
+
+    @torch.no_grad()
+    def _update_stats(self, x: torch.Tensor) -> None:
+        """Welford online update across batch dimension."""
+        flat = x.detach().reshape(-1, x.shape[-1])
+        batch_mean = flat.mean(dim=0)
+        batch_var = flat.var(dim=0, unbiased=False)
+        batch_count = flat.shape[0]
+
+        old_count = self.count.item()
+        new_count = old_count + batch_count
+        if new_count == 0:
+            return
+
+        delta = batch_mean - self.mean
+        new_mean = self.mean + delta * (batch_count / new_count)
+        m_a = self.var * old_count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta.pow(2) * old_count * batch_count / new_count
+        new_var = m2 / new_count
+
+        self.mean.copy_(new_mean)
+        self.var.copy_(new_var)
+        self.count.fill_(new_count)
+
+    def forward(self, x: torch.Tensor, update: bool = False) -> torch.Tensor:
+        if update:
+            self._update_stats(x)
+        std = torch.sqrt(self.var + self.eps)
+        normed = (x - self.mean) / std
+        return normed.clamp(-self.clip, self.clip)
+

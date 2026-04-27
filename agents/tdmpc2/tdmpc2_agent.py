@@ -13,6 +13,7 @@ from agents.tdmpc2.planner import MPPIPlanner
 from agents.tdmpc2.replay_buffer import SequenceReplayBuffer
 from agents.tdmpc2.scale import RunningScale
 from agents.tdmpc2.utils import (
+    RunningObsNormalizer,
     build_support,
     logits_to_scalar,
     soft_cross_entropy,
@@ -98,6 +99,10 @@ class TDMPC2Agent(BaseAlgorithm):
             device=self.device,
         )
         self.q_scale = RunningScale(tau=config.tau, device=self.device)
+
+        self.endog_normalizer = RunningObsNormalizer(self.endog_obs_dim).to(self.device)
+        self.exog_normalizer = RunningObsNormalizer(self.exog_obs_dim).to(self.device)
+
         self.last_metrics: Dict[str, float] = {}
 
     def set_utd(self, utd: int) -> None:
@@ -142,6 +147,9 @@ class TDMPC2Agent(BaseAlgorithm):
         q1, q2 = self._sample_two_q_values(logits)
         return torch.minimum(q1, q2).unsqueeze(-1)
 
+    def _normalize_obs(self, endog: torch.Tensor, exog: torch.Tensor, update: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.endog_normalizer(endog, update=update), self.exog_normalizer(exog, update=update)
+
     def _model_loss(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, dict[str, float]]:
         endog_seq = batch["endog_seq"]
         exog_seq = batch["exog_seq"]
@@ -150,6 +158,14 @@ class TDMPC2Agent(BaseAlgorithm):
         terminated = batch["terminated"]
         time_out = batch["time_out"]
         done_any = torch.clamp(terminated + time_out, 0.0, 1.0)
+
+        # Normalize observations.
+        bsz, seq_len, _ = endog_seq.shape
+        endog_flat = endog_seq.reshape(-1, self.endog_obs_dim)
+        exog_flat = exog_seq.reshape(-1, self.exog_obs_dim)
+        endog_norm, exog_norm = self._normalize_obs(endog_flat, exog_flat)
+        endog_seq = endog_norm.reshape(bsz, seq_len, -1)
+        exog_seq = exog_norm.reshape(bsz, seq_len, -1)
 
         horizon = actions.shape[1]
         z = self.model.encode(endog_seq[:, 0], exog_seq[:, 0])
@@ -229,6 +245,14 @@ class TDMPC2Agent(BaseAlgorithm):
         exog_seq = batch["exog_seq"]
         horizon = endog_seq.shape[1] - 1
 
+        # Normalize observations.
+        bsz, seq_len, _ = endog_seq.shape
+        endog_flat = endog_seq.reshape(-1, self.endog_obs_dim)
+        exog_flat = exog_seq.reshape(-1, self.exog_obs_dim)
+        endog_norm, exog_norm = self._normalize_obs(endog_flat, exog_flat)
+        endog_seq = endog_norm.reshape(bsz, seq_len, -1)
+        exog_seq = exog_norm.reshape(bsz, seq_len, -1)
+
         with torch.no_grad():
             z = self.model.encode(endog_seq[:, 0], exog_seq[:, 0])
 
@@ -281,6 +305,7 @@ class TDMPC2Agent(BaseAlgorithm):
         planner_env_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         with torch.no_grad():
+            endog_obs, exog_obs = self._normalize_obs(endog_obs, exog_obs)
             z = self.model.encode(endog_obs, exog_obs)
             action, _ = self._sample_policy(z, exog_obs, deterministic=deterministic)
 
@@ -310,6 +335,10 @@ class TDMPC2Agent(BaseAlgorithm):
         )
 
     def store_transition(self, **kwargs) -> None:
+        # Update normalizer stats with raw observations.
+        with torch.no_grad():
+            self.endog_normalizer(kwargs["endog_obs"], update=True)
+            self.exog_normalizer(kwargs["exog_obs"], update=True)
         self.replay.add(
             endog_obs=kwargs["endog_obs"],
             exog_obs=kwargs["exog_obs"],
@@ -377,6 +406,8 @@ class TDMPC2Agent(BaseAlgorithm):
                 "model_optimizer": self.model_optimizer.state_dict(),
                 "policy_optimizer": self.policy_optimizer.state_dict(),
                 "q_scale": self.q_scale.state_dict(),
+                "endog_normalizer": self.endog_normalizer.state_dict(),
+                "exog_normalizer": self.exog_normalizer.state_dict(),
                 "config": self.config.__dict__,
                 "global_updates": self.global_updates,
             },
@@ -391,4 +422,8 @@ class TDMPC2Agent(BaseAlgorithm):
         self.policy_optimizer.load_state_dict(ckpt["policy_optimizer"])
         if "q_scale" in ckpt:
             self.q_scale.load_state_dict(ckpt["q_scale"])
+        if "endog_normalizer" in ckpt:
+            self.endog_normalizer.load_state_dict(ckpt["endog_normalizer"])
+        if "exog_normalizer" in ckpt:
+            self.exog_normalizer.load_state_dict(ckpt["exog_normalizer"])
         self.global_updates = int(ckpt.get("global_updates", 0))
