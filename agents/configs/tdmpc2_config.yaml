@@ -1,7 +1,7 @@
 # TD-MPC2 single-task config for Unitree motion imitation.
 
 # Environment/task.
-motion_path: "data/motions_npz/walk1.npz"
+motion_path: "/home/dtc/dinesh_varun/16831/project/16831_IRL_Project/unitree_rl_mjlab/src/assets/motions/g1/walk1_subject1.npz"
 task: "Unitree-G1-Tracking"
 num_envs: 512
 seed: 42

@@ -62,7 +62,10 @@ python scripts/train.py Unitree-G1-Tracking-No-State-Estimation \
   --env.scene.num-envs 4096
 cd ..
 ```
-
+### Evaluate PPO
+```bash
+python scripts/play.py Unitree-G1-Tracking --motion_file=/home/dtc/dinesh_varun/16831/project/16831_IRL_Project/unitree_rl_mjlab/src/assets/motions/g1/walk1_subject1.npz --checkpoint_file=/home/dtc/dinesh_varun/16831/project/16831_IRL_Project/logs/rsl_rl/g1_tracking/2026-04-23_16-27-13_PPO/model_20500.pt
+```
 ### Train SAC (Repo Baseline)
 
 ```bash
@@ -100,8 +103,20 @@ python -m scripts.train.train_tdmpc2 \
 
 ```bash
 python -m scripts.eval.eval_tdmpc2 \
-  --checkpoint models/<run_name>/final.pt \
+  --checkpoint models/run3/ckpt_step_7450000.pt \
   --config agents/configs/tdmpc2_config.yaml \
   --num-envs 32 \
   --episodes 20
 ```
+
+### Save Video
+
+```bash
+python -m scripts.eval.eval_tdmpc2 \
+  --checkpoint models/run3/ckpt_step_7450000.pt \
+  --config agents/configs/tdmpc2_config.yaml \
+  --num-envs 1 \
+  --episodes 1 \
+  --video
+```
+

@@ -71,9 +71,7 @@ def logits_to_scalar(
 
 
 class RunningObsNormalizer(nn.Module):
-    """Running mean/std observation normalization.During training the running statistics are
-    updated with every new batch of observations; at inference time
-    (``update=False``) the frozen statistics are used.
+    """Running mean/std observation normalization.During training the running statistics are updated with every new batch of observations; at inference time(update=False) the frozen statistics are used.
     """
 
     def __init__(self, dim: int, clip: float = 5.0, eps: float = 1e-5):

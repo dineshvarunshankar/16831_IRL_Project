@@ -22,6 +22,8 @@ def evaluate():
     parser.add_argument("--motion-file", type=str, default=None)
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--video", action="store_true", help="Record an MP4 video of the evaluation")
+    parser.add_argument("--no-terminations", action="store_true", help="Disable early terminations so the episode plays out")
     args = parser.parse_args()
 
     cfg = load_tdmpc2_config(args.config)
@@ -42,7 +44,26 @@ def evaluate():
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.observations["actor"].concatenate_terms = False
 
-    env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device)
+    if args.no_terminations:
+        print("[INFO] Terminations disabled. The episode will run for the full length.")
+        env_cfg.terminations = {}
+
+    render_mode = "rgb_array" if args.video else None
+    env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device, render_mode=render_mode)
+    
+    if args.video:
+        import os
+        from mjlab.utils.wrappers import VideoRecorder
+        video_dir = os.path.join(os.path.dirname(args.checkpoint), "videos")
+        print(f"[INFO] Video recording enabled. Saving to {video_dir}")
+        env = VideoRecorder(
+            env,
+            video_folder=video_dir,
+            step_trigger=lambda step: step == 0,
+            video_length=1000,
+            disable_logger=True,
+        )
+
     env = TDMPC2VecEnvWrapper(env, exogenous_terms=tuple(cfg.exogenous_terms), clip_actions=None)
 
     agent = TDMPC2Agent(
